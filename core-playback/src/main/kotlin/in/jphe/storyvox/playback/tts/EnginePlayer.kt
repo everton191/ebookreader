@@ -72,6 +72,7 @@ import `in`.jphe.storyvox.playback.voice.VoiceFamilyIds
 import `in`.jphe.storyvox.playback.voice.VoiceManager
 import `in`.jphe.storyvox.playback.voice.toEngineKey
 import java.io.File
+import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
@@ -97,6 +98,21 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+
+private fun File.sha256ForDiagnostics(): String = runCatching {
+    val digest = MessageDigest.getInstance("SHA-256")
+    inputStream().buffered().use { input ->
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            digest.update(buffer, 0, count)
+        }
+    }
+    digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+}.getOrElse { error ->
+    "ERROR:${error.javaClass.simpleName}:${error.message.orEmpty()}"
+}
 
 /**
  * In-process Media3 [Player] that bypasses Android's [android.speech.tts.TextToSpeech]
@@ -2292,8 +2308,43 @@ class EnginePlayer @AssistedInject constructor(
                             "Tier 3 init Piper instances=${parallelState.instances} " +
                                 "threadsPerInstance=$nt onnx=${onnx.takeLast(60)}",
                         )
-                        val primaryResult = VoiceEngine.getInstance()
-                            .loadModel(context, onnx, tokens, nt)
+                        val isLessac = active.id.contains("lessac", ignoreCase = true)
+                        val lessacModel = File(onnx)
+                        val lessacLoadStart = android.os.SystemClock.elapsedRealtime()
+                        if (isLessac) {
+                            android.util.Log.i("EnginePlayer", "LESSAC_MODEL_PATH=${lessacModel.absolutePath}")
+                            android.util.Log.i("EnginePlayer", "LESSAC_MODEL_EXISTS=${lessacModel.exists()}")
+                            android.util.Log.i("EnginePlayer", "LESSAC_MODEL_SIZE=${lessacModel.takeIf(File::exists)?.length() ?: 0L}")
+                            android.util.Log.i("EnginePlayer", "LESSAC_CHECKSUM=${lessacModel.sha256ForDiagnostics()}")
+                            android.util.Log.i("EnginePlayer", "LESSAC_LOAD_START=$lessacLoadStart")
+                        }
+                        val primaryResult = try {
+                            VoiceEngine.getInstance().loadModel(context, onnx, tokens, nt)
+                        } catch (error: Throwable) {
+                            if (isLessac) {
+                                android.util.Log.e(
+                                    "EnginePlayer",
+                                    "LESSAC_EXCEPTION=${error.javaClass.name}:${error.message.orEmpty()}",
+                                    error,
+                                )
+                            }
+                            throw error
+                        } finally {
+                            if (isLessac) {
+                                val lessacLoadEnd = android.os.SystemClock.elapsedRealtime()
+                                android.util.Log.i("EnginePlayer", "LESSAC_LOAD_END=$lessacLoadEnd")
+                                android.util.Log.i(
+                                    "EnginePlayer",
+                                    "LESSAC_LOAD_MS=${lessacLoadEnd - lessacLoadStart}",
+                                )
+                            }
+                        }
+                        if (isLessac && primaryResult != "Success") {
+                            android.util.Log.w(
+                                "EnginePlayer",
+                                "LESSAC_FALLBACK=required result=${primaryResult ?: "null"}",
+                            )
+                        }
                         android.util.Log.i(
                             "EnginePlayer",
                             "Tier 3 primary Piper load: result=$primaryResult",
