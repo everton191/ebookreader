@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="settings_local_ai_title">Local AI</string>
+    <string name="settings_local_ai_empty">No local model installed</string>
     <!-- Shared utility -->
     <string name="empty_string"></string>
     <!-- Issue #786 — offline banner shown on network surfaces when connectivity is lost. -->
