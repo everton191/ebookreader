@@ -2,10 +2,12 @@ package `in`.jphe.storyvox.playback.tts.source
 
 import android.os.Process as AndroidProcess
 import `in`.jphe.storyvox.playback.SentenceRange
+import `in`.jphe.storyvox.playback.PlaybackResourceGovernor
 import `in`.jphe.storyvox.playback.cache.PcmAppender
 import `in`.jphe.storyvox.playback.cache.PcmAppenderLease
 import `in`.jphe.storyvox.playback.tts.Sentence
 import `in`.jphe.storyvox.playback.tts.Phase4TtsMetrics
+import `in`.jphe.storyvox.playback.tts.AdaptivePrefetchController
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
@@ -164,6 +166,7 @@ class EngineStreamingSource(
     private val metricsEngineId: String = "unknown",
     private val metricsVoiceId: String = "unknown",
     private val metricsQuality: String = "unknown",
+    private val prefetchController: AdaptivePrefetchController = AdaptivePrefetchController(),
 ) : PcmSource {
 
     /** SAM-style handle so tests can fake the engine without pulling the
@@ -373,6 +376,7 @@ class EngineStreamingSource(
             val durMs = pcmDurationMs(chunk.pcm.size) +
                 pcmDurationMs(chunk.trailingSilenceBytes)
             _bufferHeadroomMs.update { (it - durMs).coerceAtLeast(0L) }
+            updateResourcePressure()
         }
     }
 
@@ -393,6 +397,7 @@ class EngineStreamingSource(
 
     override suspend fun close() {
         running.set(false)
+        PlaybackResourceGovernor.reset()
         // #906 — settle the in-flight chunk's headroom. If the consumer
         // aborted between dequeue and its post-write decrement (pipeline
         // torn down mid-write on voice swap / seek / chapter advance), the
@@ -512,6 +517,24 @@ class EngineStreamingSource(
             else -> startSerialProducer(fromIndex)
         }
 
+    /** Back-pressure by audio time rather than sentence count. */
+    private suspend fun awaitPrefetchCapacity() {
+        updateResourcePressure()
+        if (!prefetchController.shouldGenerate(_bufferHeadroomMs.value)) {
+            _bufferHeadroomMs.first {
+                !running.get() || prefetchController.shouldGenerate(it)
+            }
+        }
+    }
+
+    private fun updateResourcePressure() {
+        PlaybackResourceGovernor.onReadyAudioChanged(
+            readyAudioMs = _bufferHeadroomMs.value,
+            criticalMs = prefetchController.criticalMs,
+            targetMs = prefetchController.targetMs,
+        )
+    }
+
     /**
      * Tier 3 (#88) — two-engine parallel producer. Sentences fan out
      * via a [Channel]; two workers each grab the next index and synth
@@ -590,6 +613,7 @@ class EngineStreamingSource(
                         pcmDurationMs(chunk.trailingSilenceBytes)
                 }
                 Phase4TtsMetrics.recordReadyAudio(_bufferHeadroomMs.value)
+                updateResourcePressure()
                 // PR-D (#86) — tee write FROM THE SEQUENCER. Workers in
                 // [runParallelWorker] complete out of order (sentence 3
                 // may finish before sentence 1); writing the cache from
@@ -674,6 +698,7 @@ class EngineStreamingSource(
         try {
             for (i in jobChan) {
                 if (!running.get()) break
+                awaitPrefetchCapacity()
                 val s = sentences[i]
                 val spokenText = pronunciationDictApply(s.text)
                 val generationStart = System.nanoTime()
@@ -731,6 +756,7 @@ class EngineStreamingSource(
         try {
             for (i in fromIndex until sentences.size) {
                 if (!running.get()) return@launch
+                awaitPrefetchCapacity()
                 val s = sentences[i]
                 // Issue #135: substitute *only* the text fed to the
                 // engine. `s.text` and the highlight char-range stay
@@ -783,6 +809,7 @@ class EngineStreamingSource(
                     it + pcmDurationMs(pcm.size) + pcmDurationMs(silenceBytes)
                 }
                 Phase4TtsMetrics.recordReadyAudio(_bufferHeadroomMs.value)
+                updateResourcePressure()
                 // PR-D (#86) — tee write. Mirror every generated
                 // sentence into the on-disk cache. Synchronous, on the
                 // producer's dedicated thread. The appender's
