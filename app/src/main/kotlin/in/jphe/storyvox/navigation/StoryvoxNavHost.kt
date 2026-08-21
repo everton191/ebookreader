@@ -369,7 +369,10 @@ object StoryvoxRoutes {
      * too. The bar's *selected* mapping (below) collapses any of these
      * to the LIBRARY pill since that's the umbrella destination now.
      */
-    private val HOME_ROUTES = setOf(PLAYING, LIBRARY, FOLLOWS, BROWSE, VOICE_LIBRARY, NOTES, SETTINGS_HUB, SETTINGS)
+    private val HOME_ROUTES = setOf(
+        PLAYING, LIBRARY, FOLLOWS, BROWSE, VOICE_LIBRARY, NOTES,
+        SETTINGS_HUB, SETTINGS, SETTINGS_DOWNLOADS,
+    )
     /** Strip any nav query-arg suffix before checking — PR #475 (magic-link)
      *  registered LIBRARY as `library?sharedUrl={sharedUrl}`, so
      *  `currentBackStackEntryAsState()` reports `destination.route` with the
@@ -583,12 +586,9 @@ private fun StoryvoxNavHostContent(
     // Library sub-tabs (Follows, Inbox, History) still collapse to the
     // Library pill since those remain under the Library umbrella.
     val selectedTab = when (currentRoute?.substringBefore("?")) {
-        StoryvoxRoutes.SETTINGS_HUB,
-        StoryvoxRoutes.SETTINGS -> HomeTab.Settings
-        StoryvoxRoutes.VOICE_LIBRARY -> HomeTab.Voices
-        StoryvoxRoutes.NOTES -> HomeTab.Notes
-        StoryvoxRoutes.PLAYING -> HomeTab.Playing
-        StoryvoxRoutes.BROWSE -> HomeTab.Browse
+        StoryvoxRoutes.SETTINGS,
+        StoryvoxRoutes.SETTINGS_HUB -> HomeTab.Settings
+        StoryvoxRoutes.SETTINGS_DOWNLOADS -> HomeTab.Downloads
         // Library + Follows + Inbox + History sub-tabs and
         // Reader / Audiobook drill-downs all light the Library pill —
         // Library is still the umbrella for that whole tree.
@@ -608,10 +608,7 @@ private fun StoryvoxNavHostContent(
     val onSelectTab: (HomeTab) -> Unit = { tab ->
         val target = when (tab) {
             HomeTab.Library -> StoryvoxRoutes.LIBRARY
-            HomeTab.Playing -> StoryvoxRoutes.PLAYING
-            HomeTab.Browse -> StoryvoxRoutes.BROWSE
-            HomeTab.Voices -> StoryvoxRoutes.VOICE_LIBRARY
-            HomeTab.Notes -> StoryvoxRoutes.NOTES
+            HomeTab.Downloads -> StoryvoxRoutes.SETTINGS_DOWNLOADS
             HomeTab.Settings -> StoryvoxRoutes.SETTINGS_HUB
         }
         // Issue #918 — strip query-parameter suffixes before comparing.

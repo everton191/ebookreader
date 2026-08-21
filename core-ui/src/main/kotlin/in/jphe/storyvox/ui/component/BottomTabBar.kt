@@ -21,16 +21,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoStories
-import androidx.compose.material.icons.filled.Explore
-import androidx.compose.material.icons.filled.GraphicEq
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.AutoStories
-import androidx.compose.material.icons.outlined.Explore
-import androidx.compose.material.icons.outlined.GraphicEq
-import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.RecordVoiceOver
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -122,16 +116,9 @@ enum class HomeTab(
      */
     val inBottomBar: Boolean = true,
 ) {
-    Playing("Playing", Icons.Filled.PlayArrow, Icons.Outlined.PlayArrow),
-    Library("Library", Icons.Filled.AutoStories, Icons.Outlined.AutoStories),
-    Browse("Browse", Icons.Filled.Explore, Icons.Outlined.Explore),
-    Voices("Voices", Icons.Filled.RecordVoiceOver, Icons.Outlined.RecordVoiceOver),
-    // Voice Notes (epic #1657) — waveform glyph, distinct from Voices'
-    // RecordVoiceOver head. RAIL-ONLY: shown in the SideNavRail, not the phone
-    // dock (phones use the Library top-bar action). Same GraphicEq glyph is
-    // reused by that action so the entry reads as one design family.
-    Notes("Notes", Icons.Filled.GraphicEq, Icons.Outlined.GraphicEq, inBottomBar = false),
-    Settings("Settings", Icons.Filled.Settings, Icons.Outlined.Settings),
+    Library("Biblioteca", Icons.Filled.AutoStories, Icons.Outlined.AutoStories),
+    Downloads("Downloads", Icons.Filled.Download, Icons.Outlined.Download),
+    Settings("Configurações", Icons.Filled.Settings, Icons.Outlined.Settings),
 }
 
 /**
