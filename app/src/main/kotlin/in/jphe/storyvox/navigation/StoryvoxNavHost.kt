@@ -505,19 +505,8 @@ fun StoryvoxNavHost(
         // emits false-forever after first dismissal, so this composable
         // is a no-op on every launch after the first qualifying one.
         MilestoneDialogHost()
-        // Issue #500 — magical InstantDB sign-in onboarding card.
-        // Same mount-and-gate pattern as MilestoneDialogHost: the VM
-        // returns false-forever after the user dismisses or completes
-        // the flow, so the card is a no-op on every launch after the
-        // first one. Sits alongside MilestoneDialogHost (not nested in
-        // it) so the two compete for screen time on equal terms —
-        // first-launch v0.5.39+ users see Calliope first (one-shot
-        // graduation moment) and the sync card on the launch after.
-        // Routes its "Sign in" tap to the SYNC destination via the
-        // shared navController.
-        `in`.jphe.storyvox.feature.sync.SyncOnboardingHost(
-            onOpenSignIn = { navController.navigate(StoryvoxRoutes.SYNC) },
-        )
+        // Reader fork: cloud sync is intentionally absent from first launch.
+        // Google Drive remains available through Android's document picker.
     }
     }
 }

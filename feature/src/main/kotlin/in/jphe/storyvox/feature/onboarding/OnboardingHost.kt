@@ -157,55 +157,11 @@ fun OnboardingHost(
                                 },
                             )
                             OnboardingStep.VoicePick -> VoicePickerOnboarding(
-                                onContinue = { step = OnboardingStep.SourcePick },
-                                onSkip = { step = OnboardingStep.SourcePick },
+                                onContinue = viewModel::markCompleted,
+                                onSkip = viewModel::markCompleted,
                                 onMoreVoices = {
                                     viewModel.markCompleted()
                                     onOpenVoiceLibrary()
-                                },
-                            )
-                            // #1370 — "What do you want to read?" Toggles
-                            // write straight through to settings, so both
-                            // CTAs are pure navigation onward to the
-                            // first-fiction picker; Skip just leaves the
-                            // default-enabled roster untouched.
-                            OnboardingStep.SourcePick -> SourcePickerOnboarding(
-                                onContinue = { step = OnboardingStep.FirstFiction },
-                                onSkip = { step = OnboardingStep.FirstFiction },
-                            )
-                            OnboardingStep.FirstFiction -> FirstFictionPicker(
-                                // Issues #644 + #647 (v1.0) — bypass the
-                                // TechEmpower Home hub AND the Guides
-                                // fiction-detail stop. The viewmodel
-                                // resolves the first chapter of the
-                                // `notion:guides` fiction, queues it on
-                                // the playback controller with
-                                // `autoPlay=true`, then [onOpenGuidesAndPlay]
-                                // navigates the user to the Playing
-                                // surface so they land on the transport
-                                // UI as the chapter warms. Net: two taps
-                                // (the hub stop + the Guides-cover stop)
-                                // disappear from the first-launch flow.
-                                //
-                                // Fallback path: if chapter resolution
-                                // fails (network down, source unreachable,
-                                // anonymous Notion 404), the viewmodel
-                                // invokes [onOpenTechEmpower] instead so
-                                // the user lands on the hub with the same
-                                // four-card affordance they would have
-                                // seen pre-fix — never a dead end.
-                                onBrowseTechEmpower = {
-                                    viewModel.openGuidesAndAutoPlay(
-                                        onPlaying = onOpenGuidesAndPlay,
-                                        onFallbackToHub = onOpenTechEmpower,
-                                    )
-                                },
-                                onAddFromWebsite = { clip ->
-                                    viewModel.markCompleted()
-                                    onAddFromWebsite(clip)
-                                },
-                                onSkip = {
-                                    viewModel.markCompleted()
                                 },
                             )
                         }
@@ -218,7 +174,7 @@ fun OnboardingHost(
 
 /** The four pages of the welcome flow, in display order. #1370 added
  *  [SourcePick] between the voice picker and the first-fiction picker. */
-internal enum class OnboardingStep { Welcome, VoicePick, SourcePick, FirstFiction }
+internal enum class OnboardingStep { Welcome, VoicePick }
 
 @HiltViewModel
 class OnboardingHostViewModel @Inject constructor(
