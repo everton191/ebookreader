@@ -5,6 +5,7 @@ import `in`.jphe.storyvox.playback.SentenceRange
 import `in`.jphe.storyvox.playback.cache.PcmAppender
 import `in`.jphe.storyvox.playback.cache.PcmAppenderLease
 import `in`.jphe.storyvox.playback.tts.Sentence
+import `in`.jphe.storyvox.playback.tts.Phase4TtsMetrics
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
@@ -160,6 +161,9 @@ class EngineStreamingSource(
      * rebuild (matches the other live-config knobs like speed/pitch).
      */
     private val powerSaveMode: Boolean = false,
+    private val metricsEngineId: String = "unknown",
+    private val metricsVoiceId: String = "unknown",
+    private val metricsQuality: String = "unknown",
 ) : PcmSource {
 
     /** SAM-style handle so tests can fake the engine without pulling the
@@ -585,6 +589,7 @@ class EngineStreamingSource(
                     it + pcmDurationMs(chunk.pcm.size) +
                         pcmDurationMs(chunk.trailingSilenceBytes)
                 }
+                Phase4TtsMetrics.recordReadyAudio(_bufferHeadroomMs.value)
                 // PR-D (#86) — tee write FROM THE SEQUENCER. Workers in
                 // [runParallelWorker] complete out of order (sentence 3
                 // may finish before sentence 1); writing the cache from
@@ -671,6 +676,7 @@ class EngineStreamingSource(
                 if (!running.get()) break
                 val s = sentences[i]
                 val spokenText = pronunciationDictApply(s.text)
+                val generationStart = System.nanoTime()
                 val pcm = if (useEngineMutex) {
                     engineMutex.withLock {
                         if (!running.get()) return@withLock null
@@ -678,7 +684,16 @@ class EngineStreamingSource(
                     }
                 } else {
                     workerEngine.generateAudioPCM(spokenText, speed, pitch)
-                } ?: continue
+                }
+                val generationMs = (System.nanoTime() - generationStart) / 1_000_000L
+                if (pcm == null) {
+                    Phase4TtsMetrics.recordGenerationFailure(metricsEngineId, metricsVoiceId)
+                    continue
+                }
+                Phase4TtsMetrics.recordSegment(
+                    metricsEngineId, metricsVoiceId, metricsQuality, spokenText.length,
+                    generationMs, pcm.size, workerEngine.sampleRate,
+                )
                 if (!running.get()) break
                 val mult = punctuationPauseMultiplier.coerceAtLeast(0f)
                 val basePauseMs = (trailingPauseMs(s.text) * mult) / speed.coerceAtLeast(0.5f)
@@ -723,10 +738,20 @@ class EngineStreamingSource(
                 // the reader while the synthesizer reads the
                 // phonetic respelling.
                 val spokenText = pronunciationDictApply(s.text)
+                val generationStart = System.nanoTime()
                 val pcm = engineMutex.withLock {
                     if (!running.get()) return@withLock null
                     engine.generateAudioPCM(spokenText, speed, pitch)
-                } ?: continue
+                }
+                val generationMs = (System.nanoTime() - generationStart) / 1_000_000L
+                if (pcm == null) {
+                    Phase4TtsMetrics.recordGenerationFailure(metricsEngineId, metricsVoiceId)
+                    continue
+                }
+                Phase4TtsMetrics.recordSegment(
+                    metricsEngineId, metricsVoiceId, metricsQuality, spokenText.length,
+                    generationMs, pcm.size, engine.sampleRate,
+                )
                 if (!running.get()) return@launch
                 // Issue #90: the user-facing punctuation-pause selector
                 // (Off/Normal/Long) lands here as a multiplier. 0× kills
@@ -757,6 +782,7 @@ class EngineStreamingSource(
                 _bufferHeadroomMs.update {
                     it + pcmDurationMs(pcm.size) + pcmDurationMs(silenceBytes)
                 }
+                Phase4TtsMetrics.recordReadyAudio(_bufferHeadroomMs.value)
                 // PR-D (#86) — tee write. Mirror every generated
                 // sentence into the on-disk cache. Synchronous, on the
                 // producer's dedicated thread. The appender's

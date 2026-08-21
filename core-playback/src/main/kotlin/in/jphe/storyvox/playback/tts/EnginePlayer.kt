@@ -2222,6 +2222,12 @@ class EnginePlayer @AssistedInject constructor(
             // serve the new chapter.
             active.engineType !is EngineType.SystemTts
         if (canSkipLoad) {
+            Phase4TtsMetrics.recordModelLoad(
+                engine = active.engineType.toString(),
+                voice = active.id,
+                elapsedMs = 0L,
+                reused = true,
+            )
             android.util.Log.i(
                 "EnginePlayer",
                 "#569 loadAndPlay: skipping loadModel — engine already loaded with " +
@@ -2246,6 +2252,7 @@ class EnginePlayer @AssistedInject constructor(
             return@withLock
         }
 
+        val phase4ModelLoadStart = android.os.SystemClock.elapsedRealtime()
         val loadResult: String = withContext(Dispatchers.IO) {
             // Critical: serialize loadModel against in-flight generateAudioPCM
             // by holding engineMutex (issue #11). Without it, a Piper-to-Piper
@@ -2584,6 +2591,12 @@ class EnginePlayer @AssistedInject constructor(
                 }
             }
         }
+        Phase4TtsMetrics.recordModelLoad(
+            engine = active.engineType.toString(),
+            voice = active.id,
+            elapsedMs = android.os.SystemClock.elapsedRealtime() - phase4ModelLoadStart,
+            reused = false,
+        )
         if (loadResult != "Success") {
             _observableState.update {
                 it.copy(
@@ -3131,8 +3144,10 @@ class EnginePlayer @AssistedInject constructor(
         }
 
         val source: PcmSource = if (cacheHitSource != null) {
+            Phase4TtsMetrics.recordCache(hit = true)
             cacheHitSource
         } else {
+            Phase4TtsMetrics.recordCache(hit = false)
             // Cache miss (or hit-open failed) — streaming source +
             // tee appender path (PR-D). If a partial entry exists
             // from a prior killed render (meta.json on disk,
@@ -3189,6 +3204,9 @@ class EnginePlayer @AssistedInject constructor(
                 pronunciationDictApply = pronunciationDict::apply,
                 secondaryEngines = effectiveSecondaryHandles,
                 powerSaveMode = powerSaveMonitor.isPowerSaveMode.value,
+                metricsEngineId = engineType.toString(),
+                metricsVoiceId = loadedVoiceId ?: "unknown",
+                metricsQuality = "active-preset",
             )
         }
         pcmSource = source
@@ -3554,6 +3572,7 @@ class EnginePlayer @AssistedInject constructor(
                         !paused &&
                         !source.producedAllSentences &&
                         source.bufferHeadroomMs.value < BUFFER_UNDERRUN_THRESHOLD_MS) {
+                        Phase4TtsMetrics.recordUnderrun()
                         runCatching { track.pause() }
                         paused = true
                         scope.launch {
@@ -6027,6 +6046,9 @@ class EnginePlayer @AssistedInject constructor(
             // power-save mode.
             powerSaveMode = powerSaveMonitor.isPowerSaveMode.value,
             pronunciationDictApply = cachedPronunciationDict::apply,
+            metricsEngineId = engineType?.toString() ?: "unknown",
+            metricsVoiceId = loadedVoiceId ?: "unknown",
+            metricsQuality = "recap",
         )
         recapPcmSource = source
         recapPipelineRunning.set(true)
