@@ -44,22 +44,29 @@ bits e sample rate efetivo da engine.
 
 ## Baseline quantitativo
 
-Ainda não preenchido: o telefone permanece bloqueado por autenticação e o ADB
-não pode iniciar/importar/tocar o livro. Nenhum número será estimado ou marcado
-como medido sem logcat real.
+Medido em build debug no Zenfone 8, Lessac Piper low, 1 worker, 1,0×, capítulo
+2 de *Pride and Prejudice* importado como EPUB novo. O build debug preserva os
+logs e tem overhead; o gate final será repetido em variante profileable.
 
 | Métrica | Antes | Evidência |
 |---|---:|---|
-| MODEL_LOAD_MS | pendente | `Phase4Tts`/logcat |
-| TTS_WARMUP_MS | pendente | `Phase4Tts`/logcat |
-| PLAY_TO_FIRST_AUDIO_MS | pendente | `Phase4Tts`/logcat |
-| RTF por segmento | pendente | `Phase4Tts`/logcat |
-| READY_AUDIO_SECONDS | pendente | `Phase4Tts`/logcat |
-| CACHE_HIT_RATE | pendente | `Phase4Tts`/logcat |
-| RAM_MB | pendente | logcat + `dumpsys meminfo` |
-| QUEUE_UNDERRUN_COUNT | pendente | `Phase4Tts`/logcat |
+| MODEL_LOAD_MS | 2.405 ms | Lessac, primeira carga |
+| TTS_WARMUP_MS | não capturado | abertura direta do capítulo |
+| PLAY_TO_FIRST_AUDIO_MS | 5.992 ms | cache miss/carga fria |
+| RTF por segmento | 0,11–0,31 | 17 amostras iniciais; maioria 0,15–0,21 |
+| READY_AUDIO_SECONDS | 3,18–111,58 s | provou excesso do controle por chunks |
+| CACHE_HIT_RATE | 0% | primeiro play, 1 miss |
+| RAM_MB | 739→766 MB PSS | antes/depois de 60 s, build debug |
+| QUEUE_UNDERRUN_COUNT | 1 | underrun de partida |
 | TTS_FAILURE_COUNT | pendente | `Phase4Tts`/logcat |
-| FALLBACK_COUNT | pendente | `Phase4Tts`/logcat |
+| FALLBACK_COUNT | 0 observado | janela inicial |
+
+A Lessac carregou com 63.149.198 bytes, SHA-256 observado
+`8177731223c47c72764e7021866f549dc72b894abc6b252c7f1ca0f8f65ad659` e
+`loadModel=Success`.
+
+Com a tela apagada por 60 s, a MediaSession permaneceu ativa em estado 3 e a
+posição avançou de 41.920 para 87.360 ms. Não houve crash ou ANR nessa janela.
 
 ## Decisão de engine
 
