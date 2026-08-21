@@ -632,7 +632,6 @@ dependencies {
     implementation(project(":source-ao3"))
     implementation(project(":source-standard-ebooks"))
     implementation(project(":source-wikipedia"))
-    implementation(project(":source-wikisource"))
     // Issue #417 — :source-radio replaces :source-kvmr. Same Gradle
     // module, generalized: curated stations (KVMR, KQED, KCSB,
     // KXPR, SomaFM Groove Salad) + Radio Browser API search.
@@ -640,24 +639,11 @@ dependencies {
     // Issue #417 — JSON serialization for RadioConfigImpl's starred-
     // stations DataStore payload.
     implementation(libs.kotlinx.serialization.json)
-    // Issue #1015 — :source-librivox. Free public-domain audiobooks
-    // read by volunteers; storyvox's first pre-recorded (human-narrated)
-    // source. Same audio-stream backend as :source-radio — sections
-    // stream archive.org MP3s through Media3, no TTS. Must be on the app
-    // classpath so its KSP-generated SourcePluginDescriptor binding joins
-    // the Hilt multibinding set the registry consumes.
-    implementation(project(":source-librivox"))
     implementation(project(":source-notion"))
-    implementation(project(":source-hackernews"))
     // #1496 — Google Drive folder-as-library source.
     implementation(project(":source-google-drive"))
-    // #1238 — Google News headline feed.
-    implementation(project(":source-google-news"))
-    implementation(project(":source-arxiv"))
-    implementation(project(":source-plos"))
     implementation(project(":source-primegaming"))
     implementation(project(":source-discord"))
-    implementation(project(":source-epic-free-games"))
     implementation(project(":source-telegram"))
     // Issue #454 — Slack Web API backend. Channels-as-fictions via
     // Bot Token auth (xoxb-…). Mirrors :source-telegram's leaf
@@ -670,10 +656,6 @@ dependencies {
     // Settings → Plugins and pastes both a homeserver URL and an
     // access token.
     implementation(project(":source-matrix"))
-    // Issue #472 — magic-link Readability catch-all. Must be on the
-    // app classpath so its KSP-generated SourcePluginDescriptor binding
-    // joins the Hilt multibinding set the registry consumes.
-    implementation(project(":source-readability"))
     // Issue #1492 — Reddit OAuth2 installed-app source (BYOK). On the app
     // classpath so its KSP-generated SourcePluginDescriptor + FictionSource
     // @IntoMap bindings join the Hilt multibindings the registry consumes.
@@ -689,8 +671,6 @@ dependencies {
     // scaffold today (partner API key + PDTB DRM + per-user OAuth pending);
     // ships the DAISY text parser as the non-gated groundwork.
     implementation(project(":source-bookshare"))
-    // Issue #1495 — device calendar source (CalendarContract, local-provider).
-    implementation(project(":source-calendar"))
     // Issue #1544 — in-app Candela Handbook (local-provider; docs compiled to
     // bundled assets). First dogfood of new-source.sh --local (#1526).
     implementation(project(":source-handbook"))
