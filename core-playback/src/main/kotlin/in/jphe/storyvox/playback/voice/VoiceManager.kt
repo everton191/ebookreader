@@ -876,8 +876,10 @@ class VoiceManager @Inject constructor(
                                 onProgress(written, knownTotalBytes)
                             }
                             out.flush()
-                            }
+                            // BufferedSink.close also closes fileOut. Sync
+                            // before leaving this block while fd is valid.
                             fileOut.fd.sync()
+                            }
                         }
                     }
                 }
@@ -927,9 +929,11 @@ class VoiceManager @Inject constructor(
                         onProgress(read, totalBytes)
                     }
                     sink.flush()
+                    // BufferedSink.close also closes fileOut. Sync before
+                    // leaving this block to avoid "sync failed" on device.
+                    fileOut.fd.sync()
                     }
                 }
-                fileOut.fd.sync()
             }
         }
         commitDownload(partial, target, knownTotalBytes)
