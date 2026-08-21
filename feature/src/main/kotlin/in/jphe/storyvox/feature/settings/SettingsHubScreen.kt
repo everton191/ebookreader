@@ -300,16 +300,6 @@ fun SettingsHubScreen(
                         onClick = onOpenVoiceLibrary,
                         keywords = HubKeywords.voiceLibrary,
                     )
-                    // #1624 — Cloud Voices, newly exposed (subscreen + route
-                    // shipped, but no hub row until now; Azure key was only
-                    // reachable via Plugins → Azure → Configure).
-                    SettingsHubRow(
-                        icon = Icons.Outlined.CloudSync,
-                        title = stringResource(R.string.settings_hub_cloud_voices_title),
-                        subtitle = stringResource(R.string.settings_hub_cloud_voices_subtitle),
-                        onClick = onOpenCloudVoices,
-                        keywords = HubKeywords.cloudVoices,
-                    )
                     // #1624 — distinct glyph (was LibraryBooks, colliding with
                     // Bookshare + All settings).
                     SettingsHubRow(
@@ -427,27 +417,6 @@ fun SettingsHubScreen(
                         subtitle = stringResource(R.string.settings_hub_notifications_subtitle),
                         onClick = onOpenNotifications,
                         keywords = HubKeywords.notifications,
-                    )
-                }
-                HubGroup(
-                    query = query,
-                    heading = stringResource(R.string.settings_hub_group_ai),
-                    icon = Icons.Outlined.AutoAwesome,
-                    sections = aiSections,
-                ) {
-                    SettingsHubRow(
-                        icon = Icons.Outlined.AutoAwesome,
-                        title = stringResource(R.string.settings_hub_ai_title),
-                        subtitle = stringResource(R.string.settings_hub_ai_subtitle),
-                        onClick = onOpenAi,
-                        keywords = HubKeywords.ai,
-                    )
-                    SettingsHubRow(
-                        icon = Icons.Outlined.AutoStories,
-                        title = stringResource(R.string.settings_hub_ai_sessions_title),
-                        subtitle = stringResource(R.string.settings_hub_ai_sessions_subtitle),
-                        onClick = onOpenAiSessions,
-                        keywords = HubKeywords.aiSessions,
                     )
                 }
                 HubGroup(
@@ -758,8 +727,6 @@ internal object HubKeywords {
 internal val voiceAudioSections = listOf(
     SettingsHubSection("Voice & Playback", "Voice, speed, sleep timer, Do Not Disturb.", HubKeywords.voicePlayback),
     SettingsHubSection("Voice library", "Browse and switch between available voices.", HubKeywords.voiceLibrary),
-    // #1624 — newly exposed (subscreen shipped, no hub row before).
-    SettingsHubSection("Cloud Voices", "Azure HD & Dragon HD — bring your own key.", HubKeywords.cloudVoices),
     SettingsHubSection("Pronunciation dictionary", "Per-word phonetic overrides.", HubKeywords.pronunciation),
 )
 internal val readingDisplaySections = listOf(
@@ -793,10 +760,6 @@ internal val notificationsSections = listOf(
         HubKeywords.notifications,
     ),
 )
-internal val aiSections = listOf(
-    SettingsHubSection("AI", "Chat model, grounding, recap.", HubKeywords.ai),
-    SettingsHubSection("AI sessions", "Review past chats and delete history.", HubKeywords.aiSessions),
-)
 internal val toolsSections = listOf(
     SettingsHubSection("Listening stats", "Time listened, streaks, books finished.", HubKeywords.stats),
     SettingsHubSection("Morning Briefing", "One episode from your sources — HN, arXiv, RSS, GitHub.", HubKeywords.briefing),
@@ -822,7 +785,6 @@ val SettingsHubSections: List<SettingsHubSection> =
         contentSourcesSections +
         downloadsStorageSections +
         notificationsSections +
-        aiSections +
         toolsSections +
         systemSections +
         aboutSections +

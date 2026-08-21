@@ -37,11 +37,17 @@ class LlmRepository @Inject constructor(
     private val bedrock: BedrockProvider,
     private val teams: AnthropicTeamsProvider,
 ) {
+    private companion object {
+        // Candela Phase 2 ships as an offline reader. Keep the contracts and
+        // provider implementations compiling for the future on-device model,
+        // but make every current network-backed provider unreachable.
+        const val NETWORK_LLM_PROVIDERS_ENABLED = false
+    }
 
     /** The provider currently picked in Settings, or null when AI
      *  is disabled. */
     val active: Flow<LlmProvider?> = configFlow.map { cfg ->
-        cfg.provider?.let { providerFor(it) }
+        if (NETWORK_LLM_PROVIDERS_ENABLED) cfg.provider?.let { providerFor(it) } else null
     }
 
     /** Stream against the active provider. Throws
@@ -116,7 +122,9 @@ class LlmRepository @Inject constructor(
     /** Look up a provider class by id. Spec-only providers throw —
      *  the Settings UI should not be calling this for them; it
      *  should be greying their selection out. */
-    private fun providerFor(id: ProviderId): LlmProvider = when (id) {
+    private fun providerFor(id: ProviderId): LlmProvider {
+        if (!NETWORK_LLM_PROVIDERS_ENABLED) throw LlmError.NotConfigured(id)
+        return when (id) {
         ProviderId.Claude -> claude
         ProviderId.OpenAi -> openAi
         ProviderId.Ollama -> ollama
@@ -124,5 +132,6 @@ class LlmRepository @Inject constructor(
         ProviderId.Foundry -> foundry
         ProviderId.Bedrock -> bedrock
         ProviderId.Teams -> teams
+        }
     }
 }
