@@ -220,6 +220,18 @@ fun SettingsHubScreen(
      */
     onOpenNotifications: () -> Unit = {},
 ) {
+    ReaderSettingsHub(
+        onNavigateBack = onNavigateBack,
+        onOpenAppearance = onOpenAppearance,
+        onOpenReading = onOpenReading,
+        onOpenVoicePlayback = onOpenVoicePlayback,
+        onOpenVoiceLibrary = onOpenVoiceLibrary,
+        onOpenDownloads = onOpenDownloads,
+        onOpenAdvanced = onOpenAdvanced,
+        onOpenAbout = onOpenAbout,
+    )
+    return
+    @Suppress("UNREACHABLE_CODE")
     val spacing = LocalSpacing.current
     var query by remember { mutableStateOf("") }
     Scaffold(
@@ -543,6 +555,97 @@ fun SettingsHubScreen(
                         .semantics { liveRegion = LiveRegionMode.Polite },
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun ReaderSettingsHub(
+    onNavigateBack: () -> Unit,
+    onOpenAppearance: () -> Unit,
+    onOpenReading: () -> Unit,
+    onOpenVoicePlayback: () -> Unit,
+    onOpenVoiceLibrary: () -> Unit,
+    onOpenDownloads: () -> Unit,
+    onOpenAdvanced: () -> Unit,
+    onOpenAbout: () -> Unit,
+) {
+    val spacing = LocalSpacing.current
+    Scaffold(
+        topBar = {
+            MagicTitleBar(
+                title = stringResource(R.string.settings_hub_title),
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.settings_back),
+                        )
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = spacing.md, vertical = spacing.sm),
+            verticalArrangement = Arrangement.spacedBy(spacing.xs),
+        ) {
+            SettingsHubRow(
+                icon = Icons.Outlined.Palette,
+                title = stringResource(R.string.settings_hub_appearance_title),
+                subtitle = stringResource(R.string.settings_hub_appearance_subtitle),
+                onClick = onOpenAppearance,
+            )
+            SettingsHubRow(
+                icon = Icons.AutoMirrored.Outlined.MenuBook,
+                title = stringResource(R.string.settings_hub_reading_title),
+                subtitle = stringResource(R.string.settings_hub_reading_subtitle),
+                onClick = onOpenReading,
+            )
+            SettingsHubRow(
+                icon = Icons.Outlined.GraphicEq,
+                title = stringResource(R.string.settings_hub_voice_playback_title),
+                subtitle = stringResource(R.string.settings_hub_voice_playback_subtitle),
+                onClick = onOpenVoicePlayback,
+            )
+            SettingsHubRow(
+                icon = Icons.Outlined.RecordVoiceOver,
+                title = stringResource(R.string.settings_hub_voice_library_title),
+                subtitle = stringResource(R.string.settings_hub_voice_library_subtitle),
+                onClick = onOpenVoiceLibrary,
+            )
+            SettingsHubRow(
+                icon = Icons.Outlined.Download,
+                title = stringResource(R.string.settings_hub_downloads_title),
+                subtitle = stringResource(R.string.settings_hub_downloads_subtitle),
+                onClick = onOpenDownloads,
+            )
+            Text(
+                text = stringResource(R.string.settings_local_ai_title),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(start = spacing.md, top = spacing.md),
+            )
+            Text(
+                text = stringResource(R.string.settings_local_ai_empty),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = spacing.md, vertical = spacing.sm),
+            )
+            SettingsHubRow(
+                icon = Icons.Outlined.Tune,
+                title = stringResource(R.string.settings_hub_advanced_title),
+                subtitle = stringResource(R.string.settings_hub_advanced_subtitle),
+                onClick = onOpenAdvanced,
+            )
+            SettingsHubRow(
+                icon = Icons.Outlined.Info,
+                title = stringResource(R.string.settings_hub_about_title),
+                subtitle = stringResource(R.string.settings_hub_about_subtitle),
+                onClick = onOpenAbout,
+            )
         }
     }
 }
