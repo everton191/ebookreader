@@ -38,3 +38,17 @@ testes de perfis/benchmark/fallback e de suspensão/retomada do governador.
 Faltam: build instrumentado pós-mudança no aparelho, cache hit/seek, capítulo
 seguinte, RAM longa, underrun longo, fallback real, posição persistida e
 comparação antes/depois. A Fase 5 permanece bloqueada.
+
+## Reteste parcial — voz do sistema em PT-BR
+
+No Zenfone 8, com `português (Brasil) (offline) #1` ativo, um reteste curto
+em 2026-08-21 confirmou que a síntese não é o gargalo: `MODEL_LOAD_MS=1718`,
+`PLAY_TO_FIRST_AUDIO_MS=5681`, RTF entre `0,040` e `0,067` e headroom de
+`17,5–35,1 s`. O foco de áudio estava concedido ao processo do Candela durante
+o teste.
+
+O mesmo reteste observou underrun do `AudioTrack` na retomada rápida e uma
+tentativa de tela apagada que terminou em estado pausado; por isso estes dados
+não podem aprovar o gate. A causa da pausa ainda precisa ser reproduzida de
+modo determinístico, corrigida se for do player e validada em playback longo.
+A Fase 5 continua bloqueada.
