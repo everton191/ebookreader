@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="library_add_book">Adicionar livro</string>
     <string name="settings_local_ai_title">Inteligência Artificial</string>
     <string name="settings_local_ai_empty">IA local · Nenhum modelo instalado</string>
     <string name="settings_hub_title">Configurações</string>

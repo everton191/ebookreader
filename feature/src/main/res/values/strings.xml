@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="library_add_book">Add book</string>
     <string name="settings_local_ai_title">Local AI</string>
     <string name="settings_local_ai_empty">No local model installed</string>
     <!-- Shared utility -->

@@ -96,6 +96,8 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 
+private const val READER_FORK_SIMPLIFIED_LIBRARY = true
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun LibraryScreen(
@@ -178,6 +180,11 @@ fun LibraryScreen(
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(viewModel) {
+        if (READER_FORK_SIMPLIFIED_LIBRARY && state.tab != LibraryTab.Library) {
+            viewModel.selectTab(LibraryTab.Library)
+        }
+    }
     val addByUrlState by viewModel.addByUrlState.collectAsStateWithLifecycle()
     val manageShelvesState by viewModel.manageShelvesState.collectAsStateWithLifecycle()
     // #786 — live network state. Cached covers render fine offline; the
@@ -296,149 +303,20 @@ fun LibraryScreen(
             MagicTitleBar(
                 title = stringResource(R.string.library_title),
                 scrollBehavior = scrollBehavior,
-                actions = {
-                    // Issue #533 — top-bar action icons used to pack
-                    // flush together at 0dp gap on the Flip3 (1080dp
-                    // narrow). Inserting an 8dp Spacer between each icon
-                    // adds the visual breathing room (and tap-target
-                    // separation) that Material 3 spec recommends for
-                    // grouped action icons without bumping the row past
-                    // Flip3 width.
-                    //
-                    // Issue #517 / #775 — TechEmpower help icons
-                    // (phone for 211, forum for Discord) — leftmost so
-                    // the cross-cutting "I need help" affordances read
-                    // before the engine-specific cloud-icon. Phone is
-                    // a direct tap to 211; Discord opens the
-                    // peer-support invite URL. See
-                    // [TechEmpowerHelpIcons] for the design rationale.
-                    TechEmpowerHelpIcons()
-                    Spacer(Modifier.width(spacing.xs))
-                    // Issue #500 — brass cloud-icon affordance for the
-                    // InstantDB sync surface. The three icon states
-                    // (signed-in checkmark / spinner / question-mark)
-                    // drive off [SyncStatusViewModel] — see
-                    // [SyncCloudIcon] for the mapping. Tap opens
-                    // [SyncStatusSheet] inline.
-                    `in`.jphe.storyvox.feature.sync.SyncCloudIcon(
-                        onClick = { syncSheetOpen = true },
-                    )
-                    Spacer(Modifier.width(spacing.xs))
-                    // Voice Notes (epic #1657) — the phone-reachable entry.
-                    // Notes is rail-only in the bottom nav (HomeTab.Notes,
-                    // inBottomBar = false), so phones (no SideNavRail below
-                    // 600 dp) reach it here. Reuses HomeTab.Notes' GraphicEq
-                    // waveform glyph so the top-bar action and the tablet rail
-                    // pill read as the same destination.
-                    androidx.compose.material3.IconButton(
-                        onClick = onOpenNotes,
-                        modifier = Modifier.testTag(TestTags.LibraryOpenNotes),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.GraphicEq,
-                            contentDescription = stringResource(R.string.library_open_notes_cd),
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                },
             )
         },
         floatingActionButton = {
-            // Issue #995 + #1003 — stacked add affordances. The smaller
-            // "Scan a page" FAB sits above the primary add FAB: scan-to-read
-            // is the highest-leverage accessibility entry, so it gets a
-            // visible top-level affordance rather than living only in a sheet.
-            // The primary FAB keeps #1003's DropdownMenu — add a fiction by
-            // URL (the original flow) or make your own audiobook from pasted
-            // text — so all three entry points coexist on the single corner.
-            Column(
-                horizontalAlignment = androidx.compose.ui.Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(LocalSpacing.current.sm),
-            ) {
-                androidx.compose.material3.SmallFloatingActionButton(
-                    onClick = onScanPage,
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                ) {
-                    Icon(
-                        Icons.Filled.DocumentScanner,
-                        contentDescription = stringResource(R.string.library_scan_page_cd),
+            FloatingActionButton(
+                onClick = {
+                    importLauncher.launch(
+                        arrayOf("application/epub+zip", "application/pdf", "text/*"),
                     )
-                }
-                Box {
-                    FloatingActionButton(
-                        onClick = { addMenuOpen = true },
-                        // UI-test selector for the primary add affordance.
-                        modifier = Modifier.testTag(TestTags.LibraryFab),
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                    ) {
-                        Icon(Icons.Filled.Add, contentDescription = "Add to library")
-                    }
-                    androidx.compose.material3.DropdownMenu(
-                        expanded = addMenuOpen,
-                        onDismissRequest = { addMenuOpen = false },
-                    ) {
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text("Add by URL") },
-                            onClick = {
-                                addMenuOpen = false
-                                viewModel.showAddByUrl()
-                            },
-                        )
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text("Make your own audiobook") },
-                            onClick = {
-                                addMenuOpen = false
-                                createAudiobookOpen = true
-                            },
-                        )
-                        // Issue #1228 — import an EPUB / PDF / TXT off the
-                        // device. `text/*` widens the picker to .md /
-                        // .markdown too; the importer classifies the pick.
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text("Import a file…") },
-                            onClick = {
-                                addMenuOpen = false
-                                importLauncher.launch(
-                                    arrayOf(
-                                        "application/epub+zip",
-                                        "application/pdf",
-                                        "text/*",
-                                    ),
-                                )
-                            },
-                        )
-                        // Issue #1513 — "no scanner at home": scan a paper
-                        // packet into one shareable PDF (benefits paperwork
-                        // companion, epic #1520).
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(stringResource(R.string.library_scan_documents)) },
-                            onClick = {
-                                addMenuOpen = false
-                                onScanDocuments()
-                            },
-                        )
-                        // Issue #1514 — encrypted "My Documents" wallet
-                        // (biometric-gated on-device benefits proofs).
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(stringResource(R.string.library_open_wallet)) },
-                            onClick = {
-                                addMenuOpen = false
-                                onOpenWallet()
-                            },
-                        )
-                        // Issue #1512 — photo → fillable PDF: scan a paper
-                        // form, fill it on-phone, export a completed PDF.
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(stringResource(R.string.library_fill_form)) },
-                            onClick = {
-                                addMenuOpen = false
-                                onFillForm()
-                            },
-                        )
-                    }
-                }
+                },
+                modifier = Modifier.testTag(TestTags.LibraryFab),
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.library_add_book))
             }
         },
     ) { scaffoldPadding ->
@@ -472,7 +350,7 @@ fun LibraryScreen(
                 // "scroll for more →" discoverability fix the
                 // VoiceLibrary chip row uses (#420 + #534). Scroll
                 // mechanics were already wired; this is the discovery fix.
-                SecondaryScrollableTabRow(
+                if (!READER_FORK_SIMPLIFIED_LIBRARY) SecondaryScrollableTabRow(
                     selectedTabIndex = state.tab.ordinal,
                     modifier = Modifier.fillMaxWidth(),
                     edgePadding = spacing.md,

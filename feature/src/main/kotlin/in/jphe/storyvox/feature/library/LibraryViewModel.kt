@@ -83,7 +83,7 @@ import kotlinx.coroutines.launch
  * so this stays inside the existing visual vocabulary.
  */
 enum class LibraryTab(val label: String) {
-    Library("Library"),
+    Library("Biblioteca"),
     /**
      * Restructure (v0.5.40) — Follows folded under Library. The embedded
      * FollowsScreen body renders here sans its own TopAppBar (the Library
@@ -95,13 +95,13 @@ enum class LibraryTab(val label: String) {
      * user, signed-in scope) while Browse is the cross-source discovery
      * surface that earned its own dock pill.
      */
-    Follows("Follows"),
+    Follows("Seguindo"),
     /**
      * Issue #383 — chronological cross-source notification feed.
      * Carries a numeric badge driven by unread events.
      */
-    Inbox("Inbox"),
-    History("History"),
+    Inbox("Caixa de entrada"),
+    History("Histórico"),
 }
 
 /**
