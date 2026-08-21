@@ -45,31 +45,42 @@ reproduzido localmente com o comando registrado acima.
 
 ## Validação no aparelho
 
-Nenhum dispositivo ou emulador apareceu em `adb devices` durante esta fase.
-Por isso, os itens abaixo estão pendentes e não foram inferidos a partir do
-sucesso do build:
+Validação executada em um ASUS Zenfone 8 (`ASUS_I005DA`), serial ADB
+`RBAISCBR000F2X2`.
 
 | Verificação | Estado | Observação |
 | --- | --- | --- |
-| Instalar APK | Pendente | Sem dispositivo ADB conectado |
-| Abrir aplicativo | Pendente | Depende da instalação |
-| Importar e abrir EPUB | Pendente | Exige teste manual no aparelho |
-| Reproduzir com TTS | Pendente | Exige voz/modelo e teste manual |
-| Startup | Não medido | Requer instrumentação no aparelho |
-| RAM | Não medida | Requer processo em execução |
-| Tempo Play para áudio | Não medido | Requer reprodução real |
+| Instalar APK | Aprovado | `adb install -r` retornou `Success` |
+| Abrir aplicativo | Aprovado | `MainActivity` abriu e onboarding chegou à Biblioteca |
+| Importar e abrir EPUB | Aprovado | EPUB público do Project Gutenberg importado; título e 9 capítulos detectados |
+| Reproduzir com TTS | Aprovado com ressalva | System TTS offline reproduziu o capítulo 3 via Media3/AudioTrack |
+| Startup frio | 1.100 ms | Medido por `am start -W -S` (`TotalTime`) |
+| RAM após onboarding | 124.868 KiB PSS | Aproximadamente 121,9 MiB |
+| RAM durante reprodução | 143.625 KiB PSS | Aproximadamente 140,3 MiB |
+| Tempo AudioTrack para áudio | 1.279 ms | Criação às 12:26:37.842; estado `started` às 12:26:39.121 |
+| MediaSession | Aprovado | Sessão ativa, estado `PLAYING`, metadados do livro e capítulo 3 |
+| Tela apagada | Aprovado | Posição avançou de 36.781 ms para 51.826 ms durante 12 s em `Dozing` |
+
+Livro usado: *The Adventures of Sherlock Holmes*, de Arthur Conan Doyle,
+eBook 1661 do Project Gutenberg. O EPUB de teste ficou apenas no diretório de
+build e no armazenamento de Downloads do aparelho; não foi adicionado ao Git.
 
 ## Erros e riscos conhecidos
 
 - O build local precisa de JDK 17 disponível para o toolchain do
   `core-plugin-ksp`.
-- A Fase 1 ainda precisa da validação funcional em hardware Android antes de
-  servir como comparação completa para as fases seguintes.
+- A voz neural Lessac selecionada no onboarding não ficou pronta para uso e o
+  primeiro capítulo terminou em `Couldn't load this chapter`. A reprodução só
+  foi aprovada após ativar manualmente uma voz System TTS offline e abrir o
+  capítulo 3. Esse comportamento precisa permanecer registrado para comparação.
+- O log do primeiro carregamento registrou `NumberFormatException` para
+  `HIGH` e `MalformedURLException: no protocol`; não houve crash fatal, mas
+  esses eventos são riscos do baseline original.
 - Nenhum módulo, provider, permissão ou integração foi desabilitado ou removido.
 
 ## Critério para iniciar a Fase 2
 
-Antes de remover integrações, conectar um aparelho Android e completar a tabela
-de validação com pelo menos instalação, abertura, EPUB e TTS. Depois registrar
-startup, RAM e tempo Play para áudio para que a versão enxuta tenha comparação
-material com o Candela original.
+A Fase 1 agora possui comparação material de instalação, abertura, EPUB, TTS,
+startup, RAM, MediaSession e reprodução com tela apagada. Antes da Fase 2, usar
+este registro como limite de regressão e investigar separadamente o onboarding
+da voz Lessac, sem misturar a correção com a remoção gradual de integrações.
