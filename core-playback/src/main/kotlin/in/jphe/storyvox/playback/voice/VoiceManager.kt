@@ -14,7 +14,11 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import `in`.jphe.storyvox.data.source.AzureVoiceProvider
 import `in`.jphe.storyvox.data.source.SystemTtsVoiceProvider
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
 import java.util.zip.GZIPInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -636,10 +640,16 @@ class VoiceManager @Inject constructor(
                     return@flow
                 }
                 val voiceDir = voiceDirFor(voiceId).also { it.mkdirs() }
+                val modelFile = File(voiceDir, "model.onnx")
+                val isLessac = voiceId.contains("lessac", ignoreCase = true)
                 try {
+                    if (isLessac) {
+                        android.util.Log.i("VoiceManager", "LESSAC_DOWNLOAD_START=${android.os.SystemClock.elapsedRealtime()}")
+                        android.util.Log.i("VoiceManager", "LESSAC_BYTES_EXPECTED=${entry.sizeBytes}")
+                    }
                     downloadFile(
                         url = piper.onnxUrl,
-                        target = File(voiceDir, "model.onnx"),
+                        target = modelFile,
                         knownTotalBytes = entry.sizeBytes,
                     ) { bytesRead, total -> emit(DownloadProgress.Downloading(bytesRead, total)) }
                     // tokens.txt (~1 KB) — too small for gzip.
@@ -648,6 +658,13 @@ class VoiceManager @Inject constructor(
                         target = File(voiceDir, "tokens.txt"),
                         knownTotalBytes = 0L,
                     ) { _, _ -> /* tokens file is small (~1KB) — no per-byte tick */ }
+                    if (isLessac) {
+                        android.util.Log.i("VoiceManager", "LESSAC_DOWNLOAD_END=${android.os.SystemClock.elapsedRealtime()}")
+                        android.util.Log.i("VoiceManager", "LESSAC_BYTES_WRITTEN=${modelFile.length()}")
+                        android.util.Log.i("VoiceManager", "LESSAC_FILE_EXISTS=${modelFile.exists()}")
+                        android.util.Log.i("VoiceManager", "LESSAC_FILE_SIZE=${modelFile.length()}")
+                        android.util.Log.i("VoiceManager", "LESSAC_SHA256=${modelFile.sha256()}")
+                    }
                 } catch (ce: CancellationException) {
                     // User-driven cancel. Re-throw to honour structured
                     // concurrency — emitting Failed would surface a
@@ -832,6 +849,8 @@ class VoiceManager @Inject constructor(
         knownTotalBytes: Long,
         crossinline onProgress: suspend (bytesRead: Long, totalBytes: Long) -> Unit,
     ) {
+        val partial = target.partialDownloadFile()
+        partial.delete()
         val gzUrl = "$url.gz"
         val gzRequest = Request.Builder().url(gzUrl).build()
         val gzResponse = http.newCall(gzRequest).execute()
@@ -842,7 +861,8 @@ class VoiceManager @Inject constructor(
                     ?: (knownTotalBytes * 6 / 10)  // rough estimate for progress bar
                 body.byteStream().use { raw ->
                     GZIPInputStream(raw, 64 * 1024).use { gzStream ->
-                        target.outputStream().buffered(64 * 1024).use { out ->
+                        FileOutputStream(partial).use { fileOut ->
+                            fileOut.buffered(64 * 1024).use { out ->
                             val buf = ByteArray(64 * 1024)
                             var written = 0L
                             while (true) {
@@ -856,13 +876,17 @@ class VoiceManager @Inject constructor(
                                 onProgress(written, knownTotalBytes)
                             }
                             out.flush()
+                            }
+                            fileOut.fd.sync()
                         }
                     }
                 }
             }
+            commitDownload(partial, target, knownTotalBytes)
             return
         }
         gzResponse.close()
+        partial.delete()
 
         // Fallback: download uncompressed. Either the .gz asset hasn't
         // been uploaded yet, or the URL doesn't support it.
@@ -881,6 +905,8 @@ class VoiceManager @Inject constructor(
         knownTotalBytes: Long,
         crossinline onProgress: suspend (bytesRead: Long, totalBytes: Long) -> Unit,
     ) {
+        val partial = target.partialDownloadFile()
+        partial.delete()
         val request = Request.Builder().url(url).build()
         http.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
@@ -888,8 +914,9 @@ class VoiceManager @Inject constructor(
             }
             val body = response.body ?: throw IOException("Empty body for $url")
             val totalBytes = body.contentLength().takeIf { it > 0 } ?: knownTotalBytes
-            target.sink().buffer().use { sink ->
-                body.source().use { source ->
+            FileOutputStream(partial).use { fileOut ->
+                fileOut.sink().buffer().use { sink ->
+                    body.source().use { source ->
                     val buf = ByteArray(64 * 1024)
                     var read = 0L
                     while (true) {
@@ -900,9 +927,49 @@ class VoiceManager @Inject constructor(
                         onProgress(read, totalBytes)
                     }
                     sink.flush()
+                    }
                 }
+                fileOut.fd.sync()
             }
         }
+        commitDownload(partial, target, knownTotalBytes)
+    }
+
+    private fun File.partialDownloadFile(): File = File(parentFile, "$name.part")
+
+    private fun commitDownload(partial: File, target: File, expectedBytes: Long) {
+        if (!partial.exists() || partial.length() <= 0L) {
+            partial.delete()
+            throw IOException("Downloaded file is empty: ${target.name}")
+        }
+        if (expectedBytes > 0L && partial.length() != expectedBytes) {
+            val actual = partial.length()
+            partial.delete()
+            throw IOException("Size mismatch for ${target.name}: expected $expectedBytes, wrote $actual")
+        }
+        try {
+            Files.move(
+                partial.toPath(),
+                target.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+            Files.move(partial.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
+
+    private fun File.sha256(): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        inputStream().buffered().use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
     }
 
     private fun CatalogEntry.toUiVoiceInfo(installed: Boolean): UiVoiceInfo = UiVoiceInfo(
