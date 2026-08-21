@@ -612,6 +612,9 @@ class EnginePlayer @AssistedInject constructor(
      *  guarantees those threads see the latest loaded voice rather than a
      *  stale cached reference. */
     @Volatile private var loadedVoiceId: String? = null
+    /** Phase 4 baseline: monotonic timestamp from the user's play request to
+     * the first AudioTrack.play() for that request. Reset after one sample. */
+    @Volatile private var phase4PlayRequestedAtMs: Long? = null
 
     /** Flagged when the user picks a different voice while playback is
      *  paused. The flag tells [resume] to route through [loadAndPlay] for
@@ -1886,11 +1889,16 @@ class EnginePlayer @AssistedInject constructor(
     fun prewarmEngine() {
         if (_observableState.value.isPlaying) return
         scope.launch {
+            val phase4WarmupStart = android.os.SystemClock.elapsedRealtime()
+            var phase4WarmupEngine = "unknown"
+            var phase4WarmupVoice = "unknown"
             runCatching {
                 val active = voiceManager.activeVoice.first() ?: return@launch
                 // The active voice flow may emit a "no voice" entry on
                 // a fresh install. Loading would fail anyway; bail.
                 if (active.id.isBlank()) return@launch
+                phase4WarmupEngine = active.engineType.toString()
+                phase4WarmupVoice = active.id
                 android.util.Log.i(
                     "EnginePlayer",
                     "prewarm: scheduling load for voice=${active.id} engineType=${active.engineType}",
@@ -1933,7 +1941,20 @@ class EnginePlayer @AssistedInject constructor(
                     // volatile rather than the contended engine lock.
                     EngineSampleRateCache.refreshFromEngine()
                 }
+            }.onSuccess {
+                Phase4TtsMetrics.recordWarmup(
+                    phase4WarmupEngine,
+                    phase4WarmupVoice,
+                    android.os.SystemClock.elapsedRealtime() - phase4WarmupStart,
+                    success = true,
+                )
             }.onFailure { t ->
+                Phase4TtsMetrics.recordWarmup(
+                    phase4WarmupEngine,
+                    phase4WarmupVoice,
+                    android.os.SystemClock.elapsedRealtime() - phase4WarmupStart,
+                    success = false,
+                )
                 android.util.Log.w("EnginePlayer", "prewarm: best-effort warm failed", t)
             }
         }
@@ -1958,6 +1979,7 @@ class EnginePlayer @AssistedInject constructor(
         // Wrap the body: log the full stacktrace (instruments the real trigger
         // for the next occurrence) and surface a recoverable error instead.
         try {
+        if (autoPlay) phase4PlayRequestedAtMs = android.os.SystemClock.elapsedRealtime()
         DebugLog.i("EnginePlayer") { "loadAndPlay fiction=$fictionId chapter=$chapterId charOffset=$charOffset autoPlay=$autoPlay" }
         // Issue #944 / #956 — dedup double-fire (the second of a rapid
         // handleChapterDone + watchdog or user-tap + MediaSession-Next
@@ -3525,6 +3547,14 @@ class EnginePlayer @AssistedInject constructor(
                         runCatching { track.setVolume(v) }
                         lastVol = v
                         runCatching { track.play() }
+                        phase4PlayRequestedAtMs?.let { requestedAt ->
+                            Phase4TtsMetrics.recordPlayToFirstAudio(
+                                elapsedMs = android.os.SystemClock.elapsedRealtime() - requestedAt,
+                                engine = activeEngineType?.toString() ?: "unknown",
+                                voice = loadedVoiceId ?: "unknown",
+                            )
+                            phase4PlayRequestedAtMs = null
+                        }
                         firstSentence = false
                     }
 
