@@ -203,7 +203,7 @@ fun VoiceLibraryScreen(
                 trailingIcon = if (rawQuery.isNotEmpty()) {
                     {
                         IconButton(onClick = { viewModel.setQuery("") }) {
-                            Icon(Icons.Outlined.Close, contentDescription = "Clear search")
+                            Icon(Icons.Outlined.Close, contentDescription = "Limpar busca")
                         }
                     }
                 } else null,
@@ -307,9 +307,9 @@ fun VoiceLibraryScreen(
                 )
                 listOf(
                     QualityLevel.Studio to "Studio",
-                    QualityLevel.High to "High",
-                    QualityLevel.Medium to "Med",
-                    QualityLevel.Low to "Low",
+                    QualityLevel.High to "Alta",
+                    QualityLevel.Medium to "Média",
+                    QualityLevel.Low to "Baixa",
                 ).forEach { (tier, label) ->
                     FilterChip(
                         selected = tier in selectedTiers,
@@ -353,11 +353,11 @@ fun VoiceLibraryScreen(
                     // chips being active.
                     val emptyLabel = when {
                         rawQuery.trim().isNotEmpty() ->
-                            "No voices match \"${rawQuery.trim()}\""
+                            "Nenhuma voz encontrada para \"${rawQuery.trim()}\""
                         selectedLanguage != null ->
-                            "No voices match \"$selectedLanguage\""
+                            "Nenhuma voz encontrada para \"$selectedLanguage\""
                         else ->
-                            "No voices match the current filters"
+                            "Nenhuma voz encontrada com os filtros atuais"
                     }
                     Text(
                         emptyLabel,
@@ -367,7 +367,7 @@ fun VoiceLibraryScreen(
                     )
                     Spacer(modifier = Modifier.height(spacing.xs))
                     Text(
-                        "Try adjusting your search or filters.",
+                        "Tente ajustar a busca ou os filtros.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         textAlign = TextAlign.Center,
@@ -393,7 +393,7 @@ fun VoiceLibraryScreen(
             // everything else. Hidden entirely when empty so the screen
             // doesn't render a "no starred voices" stub for first-time users.
             if (favorites.isNotEmpty()) {
-                item { SectionHeader("★ Starred", count = favorites.size) }
+                item { SectionHeader("★ Favoritas", count = favorites.size) }
                 itemsIndexed(favorites, key = { _, item -> "fav-${item.id}" }) { index, voice ->
                     val downloading = state.currentDownload
                     val rowProgress = if (downloading?.voiceId == voice.id) downloading.progress ?: -1f else null
@@ -446,7 +446,7 @@ fun VoiceLibraryScreen(
             // a one-line nudge under the empty Installed header rather
             // than skipping it entirely; preserves the screen's existing
             // mental model.
-            item { SectionHeader("Installed", count = installedTotal) }
+            item { SectionHeader("Instaladas", count = installedTotal) }
             if (installedTotal == 0) {
                 item {
                     // #912 — friendlier empty-installed nudge with a
@@ -460,7 +460,7 @@ fun VoiceLibraryScreen(
                             .padding(spacing.sm),
                     ) {
                         Text(
-                            "No voices installed yet — pick one below to get started.",
+                            "Nenhuma voz instalada. Escolha uma abaixo para começar.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -555,7 +555,7 @@ fun VoiceLibraryScreen(
             if (availableTotal > 0) {
                 item {
                     Spacer(modifier = Modifier.height(spacing.md))
-                    SectionHeader("Available", count = availableTotal, dim = true)
+                    SectionHeader("Disponíveis", count = availableTotal, dim = true)
                 }
                 availableByEngine.forEach { (engine, tiers) ->
                     val engineCount = tiers.values.sumOf { it.size }
@@ -668,13 +668,13 @@ private fun SystemTtsInfoNote() {
         )
         Column(verticalArrangement = Arrangement.spacedBy(spacing.xxs)) {
             Text(
-                "System TTS — your device's built-in voices",
+                "Vozes do sistema",
                 style = MaterialTheme.typography.labelLarge,
                 color = accent,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                "Uses your device's installed TTS engine (Google, Samsung, etc.). No extra download needed — quality and available voices depend on what's installed in your device settings.",
+                "Usa as vozes instaladas no seu aparelho (Google, Samsung etc.). Não precisa baixar nada aqui; a qualidade e as vozes disponíveis dependem das configurações do dispositivo.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -714,13 +714,13 @@ private fun PiperInfoNote() {
         )
         Column(verticalArrangement = Arrangement.spacedBy(spacing.xxs)) {
             Text(
-                "Piper — fast, natural on-device voices",
+                "Piper — vozes locais rápidas",
                 style = MaterialTheme.typography.labelLarge,
                 color = accent,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                "Each Piper voice is a separate model download (15–60 MB). Lightweight inference — runs well on modest hardware with minimal pause between sentences. Wide language selection.",
+                "Cada voz Piper é baixada separadamente (15–60 MB). É leve e funciona bem em aparelhos modestos, com pouca pausa entre frases. Há vários idiomas.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -761,18 +761,18 @@ private fun KokoroBundleNote() {
         )
         Column(verticalArrangement = Arrangement.spacedBy(spacing.xxs)) {
             Text(
-                "Kokoro voices share one bundle",
+                "As vozes Kokoro usam o mesmo pacote",
                 style = MaterialTheme.typography.labelLarge,
                 color = brass,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                "All 53 Kokoro speakers share a single ~380 MB bundle. The first voice you pick downloads it; every voice after that activates instantly.",
+                "As 53 vozes Kokoro usam um único pacote de cerca de 380 MB. Ao escolher a primeira voz, o pacote é baixado; as demais ativam na hora.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                "Kokoro inference is heavier than Piper — on modest hardware expect a brief pause between sentences.",
+                "O Kokoro exige mais do aparelho que o Piper. Em aparelhos modestos pode haver uma pequena pausa entre frases.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
             )
@@ -812,13 +812,13 @@ private fun KittenInfoNote() {
         )
         Column(verticalArrangement = Arrangement.spacedBy(spacing.xxs)) {
             Text(
-                "Kitten — lightweight on-device TTS",
+                "Kitten — voz local leve",
                 style = MaterialTheme.typography.labelLarge,
                 color = accent,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                "All 8 Kitten speakers share a single ~25 MB model — fast to download and light on storage. First load takes 2–4 seconds; switching speakers is instant.",
+                "As 8 vozes Kitten usam um único modelo de cerca de 25 MB. É rápido para baixar e leve no armazenamento. A primeira carga leva de 2 a 4 segundos; trocar de voz é imediato.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -860,13 +860,13 @@ private fun SupertonicInfoNote() {
         )
         Column(verticalArrangement = Arrangement.spacedBy(spacing.xxs)) {
             Text(
-                "Supertonic 3 — high-quality on-device TTS",
+                "Supertonic 3 — voz local de alta qualidade",
                 style = MaterialTheme.typography.labelLarge,
                 color = accent,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                "All 10 Supertonic speakers share a single model download. High-quality prosody and naturalness — a step above Kitten and competitive with the best Piper voices.",
+                "As 10 vozes Supertonic usam um único modelo. A fala tende a ser mais natural que Kitten e comparável às melhores vozes Piper.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -895,7 +895,7 @@ private fun SectionHeader(label: String, count: Int, dim: Boolean = false) {
         modifier = Modifier
             .fillMaxWidth()
             .clearAndSetSemantics {
-                contentDescription = "$label section, $count voices"
+                contentDescription = "$label, $count ${if (count == 1) "voz" else "vozes"}"
                 role = Role.Image // Compose Material lacks Role.Header;
                 // Image is the closest neutral role that lets TalkBack
                 // read the contentDescription without claiming "Button"
@@ -990,13 +990,13 @@ private fun EngineSubHeader(
         // shortest accurate label — the family card subtitle
         // elsewhere fills in the "uses your device's voice"
         // explanation; here we want a glanceable header.
-        VoiceEngine.SystemTts -> "System TTS"
+        VoiceEngine.SystemTts -> "Vozes do sistema"
         VoiceEngine.Piper -> "Piper"
         VoiceEngine.Kokoro -> "Kokoro"
         // Issue #119 — third in-process voice family. "Lite" tag set
         // off the engine name communicates the value proposition (this
         // is the smallest tier) without making it sound like a beta.
-        VoiceEngine.Kitten -> "Kitten (Lite)"
+        VoiceEngine.Kitten -> "Kitten (leve)"
         // Issue #1114 — Supertonic 3 sub-header.
         VoiceEngine.Supertonic -> "Supertonic 3"
         // Azure HD voices land in their own sub-header so the cloud
@@ -1004,7 +1004,7 @@ private fun EngineSubHeader(
         // ☁️ glyph, but the section header restates "Azure" plainly so
         // a user scanning the library doesn't need to decode a single
         // emoji to know what's cloud vs local.
-        VoiceEngine.Azure -> "Azure (Cloud)"
+        VoiceEngine.Azure -> "Azure (nuvem)"
     }
     val reducedMotion = LocalReducedMotion.current
     val chevronRotation by animateFloatAsState(
@@ -1023,7 +1023,7 @@ private fun EngineSubHeader(
             .background(baseColor.copy(alpha = 0.06f))
             .clickable(
                 role = Role.Button,
-                onClickLabel = if (isCollapsed) "Expand $label" else "Collapse $label",
+                onClickLabel = if (isCollapsed) "Expandir $label" else "Recolher $label",
                 onClick = onToggle,
             )
             .padding(horizontal = spacing.sm, vertical = spacing.xs),
@@ -1049,7 +1049,7 @@ private fun EngineSubHeader(
         Spacer(modifier = Modifier.weight(1f))
         Icon(
             imageVector = Icons.Outlined.ExpandMore,
-            contentDescription = if (isCollapsed) "Expand $label" else "Collapse $label",
+            contentDescription = if (isCollapsed) "Expandir $label" else "Recolher $label",
             tint = baseColor.copy(alpha = 0.7f),
             modifier = Modifier
                 .size(20.dp)
@@ -1105,9 +1105,9 @@ private fun TierSubHeader(tier: QualityLevel, count: Int, dim: Boolean = false) 
  *  reads top-to-bottom without competing decorations. */
 private fun tierDisplay(tier: QualityLevel): Pair<String, String> = when (tier) {
     QualityLevel.Studio -> "Studio" to "🎙️"
-    QualityLevel.High -> "High" to ""
-    QualityLevel.Medium -> "Medium" to ""
-    QualityLevel.Low -> "Low" to ""
+    QualityLevel.High -> "Alta" to ""
+    QualityLevel.Medium -> "Média" to ""
+    QualityLevel.Low -> "Baixa" to ""
 }
 
 /** #912 — color for the quality-tier dot. Uses theme-relative colors so
@@ -1188,8 +1188,8 @@ private fun VoiceRow(
             append(", ")
             append(voice.language)
         }
-        if (isActive) append(", currently active")
-        if (isAvailable) append(", not yet downloaded")
+        if (isActive) append(", ativa agora")
+        if (isAvailable) append(", ainda não baixada")
     }
     // #912 — active voice gets a subtle gradient border glow to stand
     // out as the "current narrator". The gradient runs from primary at
@@ -1228,7 +1228,7 @@ private fun VoiceRow(
             .combinedClickable(
                 onClick = onTap,
                 onLongClick = onLongPress,
-                onClickLabel = if (isActive) "Already active" else "Pick this voice",
+                onClickLabel = if (isActive) "Voz já ativa" else "Escolher esta voz",
             )
             .semantics {
                 role = Role.Button
@@ -1416,7 +1416,7 @@ private fun FailedDownloadSubtile(
             // We prefix the human-friendly description and append the
             // raw reason so both a glance-reader and a debug-reader
             // get what they need from one line.
-            text = "Download failed: ${failed.reason}$percentSuffix",
+            text = "Falha no download: ${failed.reason}$percentSuffix",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onErrorContainer,
         )
@@ -1498,7 +1498,7 @@ private fun FavoriteToggle(
             // pre-fix copy that baked the action verb into the
             // label and confused the auto-announced state.
             .semantics {
-                contentDescription = "Star this voice"
+                contentDescription = "Favoritar esta voz"
             },
         contentAlignment = Alignment.Center,
     ) {
@@ -1610,7 +1610,7 @@ private fun ActiveChip() {
             modifier = Modifier.size(12.dp),
         )
         Text(
-            "ACTIVE",
+            "ATIVA",
             style = MaterialTheme.typography.labelSmall,
             color = onBrass,
             fontWeight = FontWeight.Bold,
@@ -1637,18 +1637,18 @@ private fun RowAction(
 ) {
     when {
         isDownloading -> Text(
-            "Downloading…",
+            "Baixando…",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary,
         )
         voice.isInstalled && isActive -> Unit
         voice.isInstalled -> BrassButton(
-            label = "Activate",
+            label = "Ativar",
             onClick = onTap,
             variant = BrassButtonVariant.Secondary,
         )
         else -> BrassButton(
-            label = "Download",
+            label = "Baixar",
             onClick = onTap,
             variant = BrassButtonVariant.Primary,
         )
@@ -1666,20 +1666,20 @@ private fun DeleteConfirmDialog(
         title = { Text(stringResource(R.string.voicelibrary_delete_title, voice.displayName)) },
         text = {
             Text(
-                "Frees ${formatBytes(voice.sizeBytes)}. You can re-download anytime from this screen.",
+                "Libera ${formatBytes(voice.sizeBytes)}. Você pode baixar novamente nesta tela quando quiser.",
                 style = MaterialTheme.typography.bodyMedium,
             )
         },
         confirmButton = {
             BrassButton(
-                label = "Delete",
+                label = "Excluir",
                 onClick = onConfirm,
                 variant = BrassButtonVariant.Primary,
             )
         },
         dismissButton = {
             BrassButton(
-                label = "Cancel",
+                label = "Cancelar",
                 onClick = onDismiss,
                 variant = BrassButtonVariant.Text,
             )
@@ -1707,14 +1707,14 @@ private fun EmptyState(modifier: Modifier = Modifier) {
         )
         Spacer(modifier = Modifier.height(spacing.lg))
         Text(
-            "Summoning voices…",
+            "Carregando vozes…",
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.SemiBold,
         )
         Spacer(modifier = Modifier.height(spacing.xs))
         Text(
-            "The voice catalog is being summoned from the archives. This will only take a moment.",
+            "O catálogo de vozes está sendo preparado. Isso leva só um instante.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -1751,17 +1751,17 @@ internal fun voiceSubtitle(voice: UiVoiceInfo): String {
         // when available ("Google", "Samsung") so users can tell two
         // OS engines apart at a glance. Fallback to "System TTS" when
         // we don't have a labelled name handy.
-        is EngineType.SystemTts -> "System TTS"
+        is EngineType.SystemTts -> "Voz do sistema"
     }
     val tierLabel = when (voice.qualityLevel) {
         QualityLevel.Studio -> "Studio"
-        QualityLevel.High -> "High"
-        QualityLevel.Medium -> "Medium"
-        QualityLevel.Low -> "Low"
+        QualityLevel.High -> "Alta"
+        QualityLevel.Medium -> "Média"
+        QualityLevel.Low -> "Baixa"
     }
     val genderLabel = when (voice.gender) {
-        VoiceGender.Female -> "Female"
-        VoiceGender.Male -> "Male"
+        VoiceGender.Female -> "Feminina"
+        VoiceGender.Male -> "Masculina"
         VoiceGender.Unknown -> null
     }
     val parts = listOfNotNull(engineLabel, tierLabel, genderLabel)
@@ -1890,7 +1890,7 @@ internal fun VoiceAdvancedExpander(
                     .fillMaxWidth()
                     .clickable(
                         role = Role.Button,
-                        onClickLabel = if (expanded) "Collapse advanced settings" else "Expand advanced settings",
+                        onClickLabel = if (expanded) "Recolher opções avançadas" else "Expandir opções avançadas",
                     ) { expanded = !expanded }
                     .padding(vertical = spacing.xxs),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1903,7 +1903,7 @@ internal fun VoiceAdvancedExpander(
                     modifier = Modifier.size(18.dp),
                 )
                 Text(
-                    "Advanced",
+                    "Avançado",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold,
@@ -1916,7 +1916,7 @@ internal fun VoiceAdvancedExpander(
                     // the established affordance vocabulary (Material 3
                     // expandable cards, gmail thread expanders, etc.).
                     imageVector = Icons.Outlined.ExpandMore,
-                    contentDescription = if (expanded) "Collapse Advanced" else "Expand Advanced",
+                    contentDescription = if (expanded) "Recolher opções avançadas" else "Expandir opções avançadas",
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
                         .size(20.dp)
@@ -1928,23 +1928,23 @@ internal fun VoiceAdvancedExpander(
                 // #197 — Lexicon file picker. One row, one button.
                 // Shows "set" / "not set" so users can tell at a glance.
                 Text(
-                    "Pronunciation lexicon",
+                    "Dicionário de pronúncia",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
                     if (lexiconPath.isNotEmpty()) {
-                        "Custom .lexicon loaded — IPA / X-SAMPA overrides apply on next play."
+                        "Dicionário .lexicon personalizado carregado. Os ajustes de IPA / X-SAMPA serão aplicados na próxima leitura."
                     } else {
-                        "Override how the voice pronounces specific names and words with a .lexicon file."
+                        "Ajuste a pronúncia de nomes e palavras com um arquivo .lexicon."
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(spacing.xs)) {
                     BrassButton(
-                        label = if (lexiconPath.isNotEmpty()) "Replace lexicon" else "Pick lexicon",
+                        label = if (lexiconPath.isNotEmpty()) "Trocar dicionário" else "Escolher dicionário",
                         onClick = {
                             // Accept any mime; .lexicon has no canonical
                             // mime type and most pickers return
@@ -1955,7 +1955,7 @@ internal fun VoiceAdvancedExpander(
                     )
                     if (lexiconPath.isNotEmpty()) {
                         BrassButton(
-                            label = "Clear",
+                            label = "Limpar",
                             onClick = { onSetLexicon(null) },
                             variant = BrassButtonVariant.Text,
                         )

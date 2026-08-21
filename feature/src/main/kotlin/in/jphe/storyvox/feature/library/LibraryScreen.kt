@@ -516,7 +516,6 @@ fun LibraryScreen(
                             onResume = viewModel::resume,
                             onTapFiction = viewModel::openFiction,
                             onLongPress = viewModel::openManageShelves,
-                            onOpenTechEmpower = onOpenTechEmpower,
                         )
                     }
 
@@ -787,7 +786,7 @@ private fun ResumeCard(entry: ContinueListeningEntry, onResume: () -> Unit) {
                 }
             }
             BrassButton(
-                label = "Resume",
+                label = "Continuar",
                 onClick = onResume,
                 variant = BrassButtonVariant.Primary,
             )
@@ -923,7 +922,7 @@ private fun EmptyLibrary() {
         }
         Spacer(Modifier.height(spacing.lg))
         Text(
-            "Your library is empty",
+            "Sua biblioteca está vazia",
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.primary,
             textAlign = TextAlign.Center,
@@ -1057,7 +1056,6 @@ private fun LibraryGridBody(
      */
     onTapFiction: (String) -> Unit,
     onLongPress: (FictionSummary) -> Unit,
-    onOpenTechEmpower: () -> Unit,
 ) {
     val spacing = LocalSpacing.current
     val isEmpty = !state.isLoading && dedupedFictions.isEmpty() && state.resume == null
@@ -1071,23 +1069,7 @@ private fun LibraryGridBody(
     }
     if (isEmpty) {
         when (val f = state.filter) {
-            ShelfFilter.All -> {
-                // Issue #517 — even with an empty library, surface the
-                // TechEmpower hero card as the first item so the
-                // brand-and-mission framing reads as the lead surface
-                // on first-launch / wiped-data states. The empty-state
-                // hint about Browse / Add-by-URL still renders below
-                // the hero via [EmptyLibrary] — call it after the hero
-                // in a Column so both stack.
-                Column(modifier = Modifier.fillMaxSize()) {
-                    Box(modifier = Modifier.padding(spacing.md)) {
-                        TechEmpowerHeroCard(onClick = onOpenTechEmpower)
-                    }
-                    Box(modifier = Modifier.weight(1f)) {
-                        EmptyLibrary()
-                    }
-                }
-            }
+            ShelfFilter.All -> EmptyLibrary()
             is ShelfFilter.OneShelf -> EmptyShelf(f.shelf)
         }
         return
@@ -1110,18 +1092,6 @@ private fun LibraryGridBody(
         horizontalArrangement = Arrangement.spacedBy(spacing.sm),
         verticalArrangement = Arrangement.spacedBy(spacing.md),
     ) {
-        // Issue #517 — TechEmpower hero card pinned as the FIRST grid
-        // item on the All filter. Brass-edged, full-span, larger than
-        // a fiction tile — reads as the lead surface for the
-        // TechEmpower default-use-case framing without dominating the
-        // user's actual library underneath. Only shown on filter ==
-        // All; shelf-filtered views are user-scoped and the
-        // brand-and-mission frame is the wrong context there.
-        if (state.filter is ShelfFilter.All) {
-            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
-                TechEmpowerHeroCard(onClick = onOpenTechEmpower)
-            }
-        }
         // Hide the Resume card on shelf-filtered views — it's a
         // library-wide affordance, and surfacing it inside a Wishlist
         // filter (a book the user hasn't started) is visually confusing.
@@ -1137,7 +1107,7 @@ private fun LibraryGridBody(
                 item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                     Column(modifier = Modifier.padding(top = spacing.xs)) {
                         Text(
-                            text = "Your library",
+                            text = "Sua biblioteca",
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(bottom = spacing.xxs),
@@ -1209,7 +1179,7 @@ private fun LibraryGridBody(
                 // doesn't sit on an eternal "Loading…".
                 if (fiction.isPlaceholder) {
                     Text(
-                        if (fiction.backfillFailed) "Couldn't load" else "Loading…",
+                        if (fiction.backfillFailed) "Não foi possível carregar" else "Carregando…",
                         style = MaterialTheme.typography.titleSmall,
                         color = if (fiction.backfillFailed) {
                             MaterialTheme.colorScheme.error
@@ -1221,7 +1191,7 @@ private fun LibraryGridBody(
                     )
                     if (fiction.backfillFailed) {
                         Text(
-                            "Tap to retry",
+                            "Toque para tentar novamente",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
