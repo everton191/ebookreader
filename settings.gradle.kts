@@ -72,31 +72,15 @@ include(":source-gutenberg")
 include(":source-ao3")
 include(":source-standard-ebooks")
 include(":source-wikipedia")
-include(":source-wikisource")
 // Issue #417 — generalized :source-kvmr → :source-radio. The renamed
 // module still serves persisted KVMR fictions via a one-cycle
 // SourceIds.KVMR alias declared in :source-radio's Hilt module.
 include(":source-radio")
-// Issue #1015 — LibriVox: free public-domain audiobooks read by
-// volunteers. storyvox's first pre-recorded (human-narrated) source —
-// sections stream archive.org MP3s through Media3 (audio-stream backend
-// #373), no TTS. Catalog from the public no-auth JSON feed at
-// librivox.org/api/feed/audiobooks/.
-include(":source-librivox")
 include(":source-notion")
-include(":source-hackernews")
 // #1496 — Google Drive folder-as-library (drive.file scope; Docs export + files).
 include(":source-google-drive")
-// #1238 — Google News headline feed (Top stories + topic sections + search).
-include(":source-google-news")
-include(":source-arxiv")
-include(":source-plos")
 include(":source-primegaming")
 include(":source-discord")
-// Issue #1493 — Epic Games Store weekly free-game giveaways. One fiction
-// ("Epic Free Games"), each current/upcoming giveaway a chapter. Reads the
-// public no-auth freeGamesPromotions JSON endpoint; no follows, no search.
-include(":source-epic-free-games")
 // Issue #462 — Telegram Bot API backend. Public-channel reader (bot
 // gets invited to channels, messages become chapters). Architectural
 // twin to :source-discord but simpler — no thread coalescing, no
@@ -116,11 +100,6 @@ include(":source-slack")
 // Plugins screen surfaces it; bot-token / access-token onboarding
 // gates content visibility).
 include(":source-matrix")
-// Issue #472 — Readability4J catch-all for the magic-link paste flow.
-// Always-on, lowest-confidence match (0.1) so any HTTP(S) URL not
-// otherwise claimed by one of the 17 specialized backends still
-// produces a single-chapter "article" fiction. "No URL is a dead-end."
-include(":source-readability")
 // Issue #1492 — Reddit source (OAuth2 installed-app, BYOK). Full post
 // bodies via the JSON API — supersedes the insta-429 RSS path (#1489/#1490).
 include(":source-reddit")
@@ -134,9 +113,6 @@ include(":source-palace")
 // DAISY text parser + a guarded FictionSource scaffold; functional
 // integration is partnership/DRM-gated (see the #1002 research comment).
 include(":source-bookshare")
-// Issue #1495 — device calendar source (CalendarContract). Local-provider,
-// zero-network; narrates your on-device agenda (Today / Tomorrow / This Week).
-include(":source-calendar")
 // Issue #1544 — in-app Candela Handbook. Local-provider (first dogfood of the
 // new-source.sh --local mode, #1526): the app's own docs, compiled into bundled
 // assets by scripts/build-handbook-assets.py and narrated like any book.
