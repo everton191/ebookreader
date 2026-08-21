@@ -125,6 +125,7 @@ class EngineStreamingSource(
     private val extraA11ySilenceMs: Int = 0,
     private val queueCapacity: Int = 8,
     private val pronunciationDictApply: (String) -> String = { it },
+    private val speechTextNormalize: (String) -> String = { it },
     /**
      * Tier 3 (#88) — list of secondary engine handles for parallel
      * synth. When non-empty, the producer fans out across the
@@ -700,7 +701,7 @@ class EngineStreamingSource(
                 if (!running.get()) break
                 awaitPrefetchCapacity()
                 val s = sentences[i]
-                val spokenText = pronunciationDictApply(s.text)
+                val spokenText = speechTextNormalize(pronunciationDictApply(s.text))
                 val generationStart = System.nanoTime()
                 val pcm = if (useEngineMutex) {
                     engineMutex.withLock {
@@ -763,7 +764,7 @@ class EngineStreamingSource(
                 // unchanged — the user sees the original sentence in
                 // the reader while the synthesizer reads the
                 // phonetic respelling.
-                val spokenText = pronunciationDictApply(s.text)
+                val spokenText = speechTextNormalize(pronunciationDictApply(s.text))
                 val generationStart = System.nanoTime()
                 val pcm = engineMutex.withLock {
                     if (!running.get()) return@withLock null

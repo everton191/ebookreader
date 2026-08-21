@@ -55,11 +55,17 @@ fun ShelfChipRow(
             FilterChip(
                 selected = isSelected,
                 onClick = { onSelect(ShelfFilter.OneShelf(shelf)) },
-                label = { Text(shelf.displayName) },
+                label = { Text(shelf.ptBrName()) },
                 colors = brassFilterChipColors(),
             )
         }
     }
+}
+
+private fun Shelf.ptBrName(): String = when (this) {
+    Shelf.Reading -> "Lendo"
+    Shelf.Read -> "Lidos"
+    Shelf.Wishlist -> "Lista de desejos"
 }
 
 @Composable

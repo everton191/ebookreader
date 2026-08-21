@@ -39,6 +39,7 @@ data class PcmCacheKey(
     val pitchHundredths: Int,
     val chunkerVersion: Int,
     val pronunciationDictHash: Int,
+    val spokenTextVersion: Int = `in`.jphe.storyvox.playback.tts.SpokenNumberNormalizer.VERSION,
 ) {
     /**
      * 64-char hex SHA-256 of `toString()`. Used as the on-disk basename

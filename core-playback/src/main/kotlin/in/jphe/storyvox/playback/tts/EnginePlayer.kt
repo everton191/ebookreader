@@ -612,6 +612,7 @@ class EnginePlayer @AssistedInject constructor(
      *  guarantees those threads see the latest loaded voice rather than a
      *  stale cached reference. */
     @Volatile private var loadedVoiceId: String? = null
+    @Volatile private var loadedVoiceLanguage: String? = null
     /** Phase 4 baseline: monotonic timestamp from the user's play request to
      * the first AudioTrack.play() for that request. Reset after one sample. */
     @Volatile private var phase4PlayRequestedAtMs: Long? = null
@@ -2631,6 +2632,7 @@ class EnginePlayer @AssistedInject constructor(
         }
         activeEngineType = active.engineType
         loadedVoiceId = active.id
+        loadedVoiceLanguage = active.language
         voiceReloadPending = false
         // Issue #582 — populate the @Volatile sample-rate cache now that
         // loadModel has returned (the engine's intrinsic monitor is no
@@ -3224,6 +3226,7 @@ class EnginePlayer @AssistedInject constructor(
                 extraA11ySilenceMs = cachedA11yExtraSilenceMs,
                 queueCapacity = queueCapacity,
                 pronunciationDictApply = pronunciationDict::apply,
+                speechTextNormalize = { text -> SpokenNumberNormalizer.normalize(text, loadedVoiceLanguage) },
                 secondaryEngines = effectiveSecondaryHandles,
                 powerSaveMode = powerSaveMonitor.isPowerSaveMode.value,
                 metricsEngineId = engineType.toString(),
@@ -6010,6 +6013,7 @@ class EnginePlayer @AssistedInject constructor(
         if (loadResult != "Success") return false
         activeEngineType = active.engineType
         loadedVoiceId = active.id
+        loadedVoiceLanguage = active.language
         return true
     }
 
@@ -6076,6 +6080,7 @@ class EnginePlayer @AssistedInject constructor(
             // power-save mode.
             powerSaveMode = powerSaveMonitor.isPowerSaveMode.value,
             pronunciationDictApply = cachedPronunciationDict::apply,
+            speechTextNormalize = { text -> SpokenNumberNormalizer.normalize(text, loadedVoiceLanguage) },
             metricsEngineId = engineType?.toString() ?: "unknown",
             metricsVoiceId = loadedVoiceId ?: "unknown",
             metricsQuality = "recap",

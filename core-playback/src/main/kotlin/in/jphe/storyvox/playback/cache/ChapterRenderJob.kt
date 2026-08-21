@@ -22,6 +22,7 @@ import `in`.jphe.storyvox.data.repository.pronunciation.PronunciationDict
 import `in`.jphe.storyvox.playback.EngineSampleRateCache
 import `in`.jphe.storyvox.playback.PlaybackResourceGovernor
 import `in`.jphe.storyvox.playback.tts.CHUNKER_VERSION
+import `in`.jphe.storyvox.playback.tts.SpokenNumberNormalizer
 import `in`.jphe.storyvox.playback.tts.SentenceChunker
 import `in`.jphe.storyvox.playback.tts.detectLocale
 import `in`.jphe.storyvox.playback.tts.source.trailingPauseMs
@@ -267,7 +268,7 @@ class ChapterRenderJob @AssistedInject constructor(
                 }
                 val pcm = engineMutex.mutex.withLock {
                     if (isStopped) return@withLock null
-                    generateAudioPCM(voice, s.text)
+                    generateAudioPCM(voice, SpokenNumberNormalizer.normalize(s.text, voice.language))
                 } ?: continue
                 val pauseMs = trailingPauseMs(s.text)
                 runCatching { lease.appendSentence(s, pcm, pauseMs) }

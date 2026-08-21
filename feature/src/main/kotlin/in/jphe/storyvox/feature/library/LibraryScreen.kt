@@ -758,9 +758,9 @@ private fun ResumeCard(entry: ContinueListeningEntry, onResume: () -> Unit) {
                 // in that case so the line ends cleanly with "Ch. 0".
                 Text(
                     text = if (entry.chapter.title.isNotBlank()) {
-                        "Ch. ${entry.chapter.index} · ${entry.chapter.title}"
+                        "Cap. ${entry.chapter.index} · ${entry.chapter.title}"
                     } else {
-                        "Ch. ${entry.chapter.index}"
+                        "Cap. ${entry.chapter.index}"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -779,7 +779,7 @@ private fun ResumeCard(entry: ContinueListeningEntry, onResume: () -> Unit) {
                             .padding(top = spacing.xxs),
                     )
                     Text(
-                        "${(fraction * 100).toInt()}% through chapter ${entry.chapter.index}",
+                        "${(fraction * 100).toInt()}% do capítulo ${entry.chapter.index}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
