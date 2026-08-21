@@ -1,6 +1,8 @@
 package `in`.jphe.storyvox.playback
 
-import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Shared priority signal for playback-adjacent work. Playback and current TTS
@@ -9,20 +11,20 @@ import java.util.concurrent.atomic.AtomicReference
 object PlaybackResourceGovernor {
     enum class SecondaryWork { ALLOWED, THROTTLED, SUSPENDED }
 
-    private val current = AtomicReference(SecondaryWork.ALLOWED)
-    val secondaryWork: SecondaryWork get() = current.get()
+    private val current = MutableStateFlow(SecondaryWork.ALLOWED)
+    val secondaryWork: SecondaryWork get() = current.value
+    val secondaryWorkFlow: StateFlow<SecondaryWork> = current.asStateFlow()
 
     fun onReadyAudioChanged(readyAudioMs: Long, criticalMs: Long, targetMs: Long) {
-        current.set(
+        current.value =
             when {
                 readyAudioMs < criticalMs -> SecondaryWork.SUSPENDED
                 readyAudioMs < targetMs -> SecondaryWork.THROTTLED
                 else -> SecondaryWork.ALLOWED
-            },
-        )
+            }
     }
 
     fun reset() {
-        current.set(SecondaryWork.ALLOWED)
+        current.value = SecondaryWork.ALLOWED
     }
 }

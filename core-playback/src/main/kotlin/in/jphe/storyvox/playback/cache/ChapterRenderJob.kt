@@ -20,6 +20,7 @@ import dagger.assisted.AssistedInject
 import `in`.jphe.storyvox.data.repository.ChapterRepository
 import `in`.jphe.storyvox.data.repository.pronunciation.PronunciationDict
 import `in`.jphe.storyvox.playback.EngineSampleRateCache
+import `in`.jphe.storyvox.playback.PlaybackResourceGovernor
 import `in`.jphe.storyvox.playback.tts.CHUNKER_VERSION
 import `in`.jphe.storyvox.playback.tts.SentenceChunker
 import `in`.jphe.storyvox.playback.tts.detectLocale
@@ -28,6 +29,7 @@ import `in`.jphe.storyvox.playback.voice.EngineType
 import `in`.jphe.storyvox.playback.voice.UiVoiceInfo
 import `in`.jphe.storyvox.playback.voice.VoiceEngineRegistry
 import `in`.jphe.storyvox.playback.voice.VoiceManager
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.withLock
 
@@ -258,6 +260,11 @@ class ChapterRenderJob @AssistedInject constructor(
                     Log.i(LOG_TAG, "pcm-cache PRERENDER-PREEMPTED chapterId=$chapterId")
                     return Result.success()
                 }
+                awaitPlaybackPriority()
+                if (isStopped) {
+                    lease.abandon()
+                    return Result.failure()
+                }
                 val pcm = engineMutex.mutex.withLock {
                     if (isStopped) return@withLock null
                     generateAudioPCM(voice, s.text)
@@ -294,6 +301,20 @@ class ChapterRenderJob @AssistedInject constructor(
             lease.abandon()
             Log.w(LOG_TAG, "pcm-cache PRERENDER-FAIL chapterId=$chapterId threw", t)
             return if (isStopped) Result.failure() else Result.retry()
+        }
+    }
+
+    /**
+     * Foreground playback owns the CPU budget. A critical ready-audio queue
+     * pauses pre-rendering; a recovering queue permits one sentence at a
+     * reduced cadence so it cannot immediately steal the recovered headroom.
+     */
+    private suspend fun awaitPlaybackPriority() {
+        val work = PlaybackResourceGovernor.secondaryWorkFlow.first {
+            it != PlaybackResourceGovernor.SecondaryWork.SUSPENDED || isStopped
+        }
+        if (work == PlaybackResourceGovernor.SecondaryWork.THROTTLED) {
+            delay(SECONDARY_WORK_THROTTLE_MS)
         }
     }
 
@@ -367,5 +388,6 @@ class ChapterRenderJob @AssistedInject constructor(
         /** Safe fallback if the engine reports `sampleRate == 0`. Matches
          *  the Piper-high default. */
         private const val DEFAULT_SAMPLE_RATE_HZ = 22_050
+        private const val SECONDARY_WORK_THROTTLE_MS = 250L
     }
 }

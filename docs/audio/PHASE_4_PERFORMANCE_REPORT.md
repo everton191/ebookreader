@@ -16,11 +16,25 @@
 ## Alteração orientada pela medição
 
 Foi adicionado back-pressure por tempo com 5/25/45 s e sinal de pressão para
-tarefas secundárias. Não houve troca de engine nem aumento de workers.
+tarefas secundárias. O pré-renderizador de capítulos agora pausa quando a fila
+de áudio está crítica e trabalha em cadência reduzida durante a recuperação.
+Não houve troca de engine nem aumento de workers.
+
+Também foram criados, no núcleo de reprodução:
+
+- perfis conservadores `AUTOMATIC`, `ECONOMY`, `BALANCED` e `HIGH`;
+- cálculo de benchmark por voz (mediana, p95 e classificação conservadora);
+- política limitada de retry/fallback, sem loop infinito.
+
+Esses três componentes têm testes unitários, mas ainda não estão conectados às
+preferências/UI nem ao fluxo de troca do motor. Portanto não são apresentados
+como funcionalidade final nesta medição.
 
 ## Gate
 
 **AINDA NÃO PASS.** O usuário removeu o aparelho antes do reteste e do teste
-de uma hora/vários capítulos. Faltam: build instrumentado pós-mudança, cache
-hit/seek, capítulo seguinte, RAM longa, underrun longo, fallback real, posição
-persistida e comparação antes/depois. A Fase 5 permanece bloqueada.
+de uma hora/vários capítulos. Localmente passaram a compilação do módulo e os
+testes de perfis/benchmark/fallback e de suspensão/retomada do governador.
+Faltam: build instrumentado pós-mudança no aparelho, cache hit/seek, capítulo
+seguinte, RAM longa, underrun longo, fallback real, posição persistida e
+comparação antes/depois. A Fase 5 permanece bloqueada.
