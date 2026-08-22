@@ -28,6 +28,7 @@ sealed interface LocalAiResult {
  */
 class LiteRtGemmaAiProvider(
     private val installer: LocalGemmaModelInstaller,
+    private val diagnostics: GemmaDiagnostics,
 ) : LocalAiProvider {
     private val mutex = Mutex()
     private var engine: Engine? = null
@@ -36,7 +37,16 @@ class LiteRtGemmaAiProvider(
         val model = installer.installedFileOrNull()
             ?: return@withLock LocalAiResult.Unavailable("Modelo local nao instalado ou sem integridade valida")
         try {
-            val activeEngine = engine ?: createEngine(model, maxTokens).also { engine = it }
+            val activeEngine = engine ?: run {
+                diagnostics.loading()
+                val started = System.nanoTime()
+                createEngine(model, maxTokens).also {
+                    engine = it
+                    diagnostics.ready((System.nanoTime() - started) / 1_000_000L)
+                }
+            }
+            diagnostics.running()
+            val started = System.nanoTime()
             val reply = withContext(Dispatchers.Default) {
                 activeEngine.createConversation().use { conversation ->
                     conversation.sendMessage(prompt).contents.contents
@@ -44,8 +54,10 @@ class LiteRtGemmaAiProvider(
                         .joinToString(separator = "") { it.text }
                 }
             }
+            diagnostics.completed(prompt, reply, (System.nanoTime() - started) / 1_000_000L)
             LocalAiResult.Success(reply)
         } catch (t: Throwable) {
+            diagnostics.failed()
             LocalAiResult.Failure("Falha na inferencia local: ${t.message ?: t.javaClass.simpleName}", t)
         }
     }
@@ -53,6 +65,7 @@ class LiteRtGemmaAiProvider(
     override suspend fun unload() = mutex.withLock {
         engine?.close()
         engine = null
+        diagnostics.unloaded()
     }
 
     private fun createEngine(model: File, maxTokens: Int): Engine =
