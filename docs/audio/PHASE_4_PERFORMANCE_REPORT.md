@@ -117,8 +117,11 @@ substituem a audição humana nem os cenários longos ainda listados no gate.
   PASS;
 - teste de seek/rebuild em RAM: segundo pipeline reutilizou o PCM e o motor foi
   chamado uma única vez;
+- downloads de modelos de voz agora também observam o `PlaybackResourceGovernor`:
+  pausam antes da próxima leitura de 64 KiB se o buffer estiver crítico e cedem
+  cadência durante a recuperação, preservando o arquivo `.part`;
 - APK debug novo: 226.553.012 bytes, SHA-256
-  `25EF70EE93EF658AA04F11EFA4094F69615A27F993604FB95379298AD52C0268`.
+  `82AFFC1358D65993D24C0C0C5F8DDFD7B0D59249B4A0FCB0EBC9BC19106C4A97`.
 
 O gate permanece **AINDA NÃO PASS**: este fechamento local não substitui o teste
 de pelo menos uma hora/vários capítulos, tela apagada, capítulo seguinte,
