@@ -80,13 +80,29 @@ private val SCRIPT_LOCALE_MAP: Map<Character.UnicodeScript, Locale> = mapOf(
  *    Locale.getDefault(). For non-Latin text (CJK, Thai, Arabic, Hebrew)
  *    the BreakIterator uses locale-appropriate rules, shifting boundaries.
  *    Bump invalidates pre-cached PCM that was chunked under the wrong locale.
+ *  - v5 (Phase 4): sentence-length cap is now enforced. Long sentences are
+ *    split at a clause or word boundary to keep native TTS allocations bounded.
  */
-const val CHUNKER_VERSION: Int = 4
+const val CHUNKER_VERSION: Int = 5
+
+/**
+ * Keep individual native TTS invocations bounded.  Long prose sentences can
+ * otherwise make Piper retain disproportionately large native work buffers on
+ * mobile devices.  This is an utterance limit, not a UI sentence limit.
+ */
+internal const val MAX_TTS_UTTERANCE_CHARS = 240
+private const val MIN_PREFERRED_UTTERANCE_CHARS = 72
+private val SOFT_UTTERANCE_BOUNDARIES = charArrayOf(',', ';', ':', '—', '–')
 
 data class Sentence(
     val index: Int,
     val startChar: Int,
     val endChar: Int,
+    val text: String,
+)
+
+private data class UtteranceDraft(
+    val startChar: Int,
     val text: String,
 )
 
@@ -105,9 +121,8 @@ class SentenceChunker @Inject constructor() {
         val iter = BreakIterator.getSentenceInstance(locale)
         iter.setText(text)
 
-        val out = mutableListOf<Sentence>()
+        val drafts = mutableListOf<UtteranceDraft>()
         var start = iter.first()
-        var idx = 0
         while (true) {
             val end = iter.next()
             if (end == BreakIterator.DONE) break
@@ -116,15 +131,7 @@ class SentenceChunker @Inject constructor() {
                 .takeIf { it >= 0 }.let { it ?: 0 }
             val sentenceText = raw.trim()
             if (sentenceText.isNotEmpty()) {
-                out += Sentence(
-                    index = idx++,
-                    startChar = trimmedStart,
-                    // endChar is rewritten below to the next sentence's startChar
-                    // (or text length for the last) so boundaries partition the
-                    // chapter contiguously. See #900.
-                    endChar = end,
-                    text = sentenceText,
-                )
+                appendBoundedUtterances(drafts, trimmedStart, sentenceText)
             }
             start = end
         }
@@ -133,9 +140,52 @@ class SentenceChunker @Inject constructor() {
         // landing in inter-sentence whitespace maps to the sentence that owns it,
         // not the previous one (which replayed it). The final sentence extends to
         // the end of the text. #900.
-        return out.mapIndexed { i, s ->
-            val end = if (i + 1 < out.size) out[i + 1].startChar else text.length
-            if (end == s.endChar) s else s.copy(endChar = end)
+        return drafts.mapIndexed { i, draft ->
+            Sentence(
+                index = i,
+                startChar = draft.startChar,
+                endChar = if (i + 1 < drafts.size) drafts[i + 1].startChar else text.length,
+                text = draft.text,
+            )
+        }
+    }
+
+    /**
+     * Splits only oversized sentences. Prefer punctuation, then whitespace;
+     * if a source has a very long token, use a hard cap rather than allowing a
+     * native inference allocation to grow without bound.
+     */
+    private fun appendBoundedUtterances(
+        out: MutableList<UtteranceDraft>,
+        sentenceStartChar: Int,
+        sentenceText: String,
+    ) {
+        var start = 0
+        while (start < sentenceText.length) {
+            val remaining = sentenceText.length - start
+            if (remaining <= MAX_TTS_UTTERANCE_CHARS) {
+                out += UtteranceDraft(sentenceStartChar + start, sentenceText.substring(start))
+                return
+            }
+
+            val hardEnd = start + MAX_TTS_UTTERANCE_CHARS
+            val preferredFloor = start + MIN_PREFERRED_UTTERANCE_CHARS
+            val punctuation = sentenceText.lastIndexOfAny(
+                SOFT_UTTERANCE_BOUNDARIES,
+                startIndex = hardEnd - 1,
+            )
+            val whitespace = sentenceText.lastIndexOf(' ', hardEnd - 1)
+            val end = when {
+                punctuation >= preferredFloor -> punctuation + 1
+                whitespace >= preferredFloor -> whitespace + 1
+                else -> hardEnd
+            }
+            val spoken = sentenceText.substring(start, end).trimEnd()
+            if (spoken.isNotEmpty()) {
+                out += UtteranceDraft(sentenceStartChar + start, spoken)
+            }
+            start = end
+            while (start < sentenceText.length && sentenceText[start].isWhitespace()) start++
         }
     }
 

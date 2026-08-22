@@ -91,6 +91,22 @@ class SentenceChunkerTest {
         assertTrue(out.all { it.text.isNotEmpty() })
     }
 
+    @Test fun `long sentence is bounded at safe utterance lengths`() {
+        val text = buildString {
+            repeat(40) { append("uma sequência longa separada por vírgula, ") }
+            append("fim.")
+        }
+
+        val out = chunker.chunk(text, Locale("pt", "BR"))
+
+        assertTrue(out.size > 1)
+        assertTrue(out.all { it.text.length <= MAX_TTS_UTTERANCE_CHARS })
+        out.forEach { sentence ->
+            assertTrue(text.substring(sentence.startChar, sentence.endChar).startsWith(sentence.text))
+        }
+        out.forEachIndexed { index, sentence -> assertEquals(index, sentence.index) }
+    }
+
     @Test fun `utteranceId encodes sentence and sub-index`() {
         assertEquals("s0_p0", chunker.utteranceId(0))
         assertEquals("s0_p0", chunker.utteranceId(0, 0))

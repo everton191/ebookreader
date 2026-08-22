@@ -127,3 +127,27 @@ O gate permanece **AINDA NÃO PASS**: este fechamento local não substitui o tes
 de pelo menos uma hora/vários capítulos, tela apagada, capítulo seguinte,
 fallback real, RAM longa, underrun longo e posição persistida no Zenfone 8. A
 Fase 5 continua bloqueada.
+
+## Teste no Zenfone 8 — Faber PT-BR e limite de segmento
+
+No teste real de 2026-08-21 com `piper_faber_pt_BR_medium`, o modelo carregou
+em 3.416 ms, o primeiro áudio foi registrado em 10.767 ms e o RTF observado
+ficou entre 0,166 e 0,414. Depois do preenchimento inicial, o buffer ficou
+entre aproximadamente 16,9 e 29,2 s.
+
+O teste também encontrou uma pressão de memória que impede o PASS: segmentos
+excepcionalmente longos (376 e 534 caracteres) coincidiram com o PSS crescendo
+de cerca de 700 MB para 1.064 MB; `dumpsys meminfo` confirmou 818 MB no heap
+nativo. O cache RAM continha apenas cerca de 7 MB, portanto ele não explica o
+salto. O app foi pausado assim que a evidência apareceu.
+
+Como correção, o `SentenceChunker` passou a aplicar de fato o limite de 240
+caracteres por utterance, preferindo vírgula, pontuação de cláusula ou espaço.
+A versão do chunker foi elevada a 5, invalidando PCM produzido pela divisão
+anterior. Testes de chunker/chave de cache e a compilação do APK passaram; o
+APK corrigido foi instalado no Zenfone 8 (SHA-256
+`A3DF2F2AFA6C37F564CC5949D792DD45733091BB474EA11DB534DCC85F3442F7`).
+
+O reteste de memória dessa correção ainda é pendente: após a instalação outra
+atividade foi trazida para o primeiro plano, e nenhum toque adicional foi feito
+fora do leitor. Assim, a Fase 4 permanece **AINDA NÃO PASS**.
