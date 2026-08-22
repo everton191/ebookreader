@@ -5,6 +5,8 @@ import android.speech.tts.TextToSpeech
 import dagger.hilt.android.qualifiers.ApplicationContext
 import `in`.jphe.storyvox.feature.api.UiVoice
 import `in`.jphe.storyvox.feature.api.VoiceProviderUi
+import `in`.jphe.storyvox.playback.voice.EngineType
+import `in`.jphe.storyvox.playback.voice.VoiceManager
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
@@ -12,52 +14,51 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * Legacy voice surface for SettingsViewModel + the legacy VoicePickerScreen +
- * ReaderViewModel. v0.4.0 introduced [in.jphe.storyvox.playback.voice.VoiceManager]
- * as the canonical source for voice install/select/download — those flows go
- * through it directly. This impl backs the framework-TTS-based "list voices the
- * OS knows about + preview them" affordance only.
+ * Compatibility surface used by SettingsViewModel. VoiceManager is the
+ * canonical source for install/select/download; this adapter exposes its real
+ * installed local-neural voices to Azure's offline-fallback picker.
  */
 @Singleton
 class VoiceProviderUiImpl @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val voiceManager: VoiceManager,
 ) : VoiceProviderUi {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val engineResolver = TtsEngineResolver(context)
 
-    override val installedVoices: Flow<List<UiVoice>> = flow {
-        val tts = bootTts() ?: run {
-            emit(emptyList())
-            return@flow
-        }
-        // try/finally so a WhileSubscribed cancellation between boot and
-        // shutdown can't leak the instance into a reconnect loop (#1384).
-        val mapped = try {
-            val voices = runCatching { tts.voices?.toList().orEmpty() }.getOrDefault(emptyList())
-            voices
-                .map {
+    override val installedVoices: Flow<List<UiVoice>> = voiceManager.installedVoices
+        .map { installed ->
+            installed.asSequence()
+                // This legacy surface is consumed by Settings' Azure fallback
+                // picker. Only genuinely local neural voices are valid there;
+                // choosing Azure would recurse and System TTS ids do not match
+                // VoiceManager's catalog fallback contract.
+                .filter { it.engineType !is EngineType.Azure }
+                .filter { it.engineType !is EngineType.SystemTts }
+                .map { voice ->
                     UiVoice(
-                        id = it.name,
-                        label = humanize(it.name),
-                        engine = "System TTS",
-                        locale = it.locale.toLanguageTag(),
+                        id = voice.id,
+                        label = voice.displayName,
+                        engine = voice.engineType.toString(),
+                        locale = voice.language.replace('_', '-'),
                     )
                 }
                 .sortedWith(compareBy({ it.locale }, { it.label }))
-        } finally {
-            runCatching { tts.shutdown() }
+                .toList()
         }
-        emit(mapped)
-    }.shareIn(scope, SharingStarted.WhileSubscribed(5_000), replay = 1)
+        .shareIn(scope, SharingStarted.WhileSubscribed(5_000), replay = 1)
 
     override fun previewVoice(voice: UiVoice) {
+        // Kept for the legacy VoiceProviderUi contract. The focused Azure
+        // settings screen does not call preview; local-neural previews are
+        // handled by the Voice Library/EnginePlayer path.
         scope.launch {
             val tts = bootTts() ?: return@launch
             try {
@@ -111,13 +112,8 @@ class VoiceProviderUiImpl @Inject constructor(
         }
     }
 
-    private fun humanize(name: String): String {
-        val cleaned = name.replace('_', '-').split('-').filter { it.isNotBlank() }
-        return cleaned.lastOrNull()?.replaceFirstChar { it.titlecase() } ?: name
-    }
-
     private companion object {
-        const val PREVIEW_TEXT = "The brass lantern flickers. Welcome back to the Library Nocturne."
+        const val PREVIEW_TEXT = "A luz da varanda acendeu. Bem-vindo de volta à sua biblioteca."
 
         /** #1384 — ceiling on the onInit await so a stuck engine init
          *  can't suspend (and leak) the instance forever. */

@@ -86,6 +86,23 @@ class EnginePlayerVoiceChurnTest {
         assertTrue(shouldRebuildForVoiceChange(piper, lastReactedVoiceId = system, loadedVoiceId = system))
     }
 
+    @Test
+    fun `restored track reloads when selected voice differs from loaded voice`() {
+        val selectedPtBrVoice = "piper_faber_pt_BR_medium"
+        assertTrue(requiresVoiceReload(selectedPtBrVoice, system))
+        assertTrue(requiresVoiceReload(selectedPtBrVoice, null))
+        assertFalse(requiresVoiceReload(selectedPtBrVoice, selectedPtBrVoice))
+        assertFalse(requiresVoiceReload(null, system))
+    }
+
+    @Test
+    fun `kokoro Brazilian voice selects Portuguese phonemizer`() {
+        assertEquals("pt", kokoroNativePhonemizerLanguage("pt_BR"))
+        assertEquals("pt", kokoroNativePhonemizerLanguage("pt-BR"))
+        assertEquals("es", kokoroNativePhonemizerLanguage("es_ES"))
+        assertEquals(null, kokoroNativePhonemizerLanguage(null))
+    }
+
     /**
      * Drives the exact [EnginePlayer.observeActiveVoice] gate over a simulated
      * emission stream and counts how many pipeline rebuilds it would trigger.

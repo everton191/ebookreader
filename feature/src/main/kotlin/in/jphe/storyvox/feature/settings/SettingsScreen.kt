@@ -1156,17 +1156,17 @@ internal fun AzureSection(
     // padded Column so the pill reads as a card-level header.
     val (statusText, statusTone) = when {
         !azure.isConfigured ->
-            "No key configured" to StatusTone.Neutral
+            "Nenhuma chave configurada" to StatusTone.Neutral
         probe == null ->
-            "Tap “Test connection” to verify" to StatusTone.Neutral
+            "Toque em “Testar conexão” para verificar" to StatusTone.Neutral
         probe is AzureProbeResult.Reachable ->
-            "Connected · ${probe.voiceCount} voices available" to StatusTone.Connected
+            "Conectado · ${probe.voiceCount} vozes disponíveis" to StatusTone.Connected
         probe is AzureProbeResult.AuthFailed ->
-            "Key rejected · re-paste from Azure portal" to StatusTone.Error
+            "Chave recusada · copie novamente no portal do Azure" to StatusTone.Error
         probe is AzureProbeResult.Unreachable ->
-            "Offline · ${probe.message}" to StatusTone.Error
+            "Sem conexão · ${probe.message}" to StatusTone.Error
         probe is AzureProbeResult.NotConfigured ->
-            "No key configured" to StatusTone.Neutral
+            "Nenhuma chave configurada" to StatusTone.Neutral
         else -> "" to StatusTone.Neutral
     }
     StatusPill(text = statusText, tone = statusTone)
@@ -1176,11 +1176,10 @@ internal fun AzureSection(
         verticalArrangement = Arrangement.spacedBy(spacing.sm),
     ) {
         Text(
-            "Bring your own Azure Speech Services subscription key to use " +
-                "HD Neural and Dragon HD voices for synthesis. The key is " +
-                "stored encrypted on this device only — storyvox never " +
-                "sees it. Pricing is paid to Azure directly (≈ $30 / 1M " +
-                "characters; F0 free tier covers 500K chars/month).",
+            "Use sua própria chave do Azure Speech para ouvir vozes neurais " +
+                "brasileiras, como Francisca e Antonio. O plano F0 oferece " +
+                "500 mil caracteres neurais grátis por mês. A chave fica " +
+                "criptografada somente neste aparelho e não é incluída no APK.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1192,7 +1191,7 @@ internal fun AzureSection(
         // still set it via [SettingsRepositoryUi.setAzureRegion]
         // programmatically, just not from Settings UI in PR-3.
         Text(
-            "Region — must match the region your Azure resource is in.",
+            "Região — deve ser a mesma do recurso criado no Azure.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1202,12 +1201,12 @@ internal fun AzureSection(
             verticalArrangement = Arrangement.spacedBy(spacing.xs),
         ) {
             listOf(
-                "eastus" to "US East",
-                "eastus2" to "US East 2",
-                "westus" to "US West",
-                "westus2" to "US West 2",
-                "westeurope" to "West Europe",
-                "eastasia" to "East Asia",
+                "eastus" to "EUA Leste",
+                "eastus2" to "EUA Leste 2",
+                "westus" to "EUA Oeste",
+                "westus2" to "EUA Oeste 2",
+                "westeurope" to "Europa Oeste",
+                "eastasia" to "Ásia Leste",
             ).forEach { (id, label) ->
                 FilterChip(
                     selected = azure.regionId == id,
@@ -1230,7 +1229,7 @@ internal fun AzureSection(
                 keyInput = it
                 onSetKey(it)
             },
-            label = { Text("Subscription key") },
+            label = { Text("Chave do Azure Speech") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             visualTransformation = if (keyVisible) {
@@ -1251,7 +1250,7 @@ internal fun AzureSection(
             // trailing-icon button.
             // a11y (#481): toggleable text — TalkBack reads "Show key, switch, off" / "Hide key, switch, on".
             Text(
-                if (keyVisible) "Hide key" else "Show key",
+                if (keyVisible) "Ocultar chave" else "Mostrar chave",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.toggleable(
@@ -1267,14 +1266,14 @@ internal fun AzureSection(
             horizontalArrangement = Arrangement.spacedBy(spacing.sm),
         ) {
             BrassButton(
-                label = "Test connection",
+                label = "Testar conexão",
                 onClick = onTest,
                 variant = BrassButtonVariant.Primary,
                 loading = probing,
             )
             if (azure.isConfigured) {
                 BrassButton(
-                    label = "Forget key",
+                    label = "Apagar chave",
                     onClick = {
                         keyInput = ""
                         onClear()
@@ -1293,23 +1292,23 @@ internal fun AzureSection(
         // Microsoft Learn's Speech Service overview — stable canonical
         // URL for "what is this and how do I get a key." The earlier
         // "/get-started" path 404'd after a docs reorg.
-        val helpUrl = "https://learn.microsoft.com/en-us/azure/ai-services/speech-service/overview"
+        val helpUrl = "https://learn.microsoft.com/pt-br/azure/ai-services/speech-service/overview"
         val annotated = buildAnnotatedString {
-            append("New here? ")
+            append("Primeira vez? ")
             withStyle(
                 SpanStyle(
                     color = MaterialTheme.colorScheme.primary,
                     textDecoration = TextDecoration.Underline,
                 ),
             ) {
-                append("How do I get an Azure Speech key?")
+                append("Como obter uma chave gratuita do Azure Speech?")
             }
         }
         // a11y (#481): Role.Button for the inline help link.
         Text(
             annotated,
             style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.clickable(role = Role.Button, onClickLabel = "Open Azure Speech docs") {
+            modifier = Modifier.clickable(role = Role.Button, onClickLabel = "Abrir ajuda do Azure Speech") {
                 // #1203 — guard against ActivityNotFoundException on devices
                 // with no browser (same fix as #1177/#1186).
                 runCatching { uriHandler.openUri(helpUrl) }
@@ -1326,14 +1325,13 @@ internal fun AzureSection(
                 color = MaterialTheme.colorScheme.surfaceVariant,
             )
             Text(
-                "Offline fallback",
+                "Continuação sem internet",
                 style = MaterialTheme.typography.titleSmall,
             )
             Text(
-                "If Azure is unreachable mid-chapter (network out, " +
-                    "Azure servers misbehaving, or quota hit), " +
-                    "auto-swap to a local voice for the rest of the " +
-                    "chapter. The next chapter will try Azure again.",
+                "Se a internet cair, o Azure falhar ou a cota acabar, " +
+                    "o Candela troca para uma voz instalada e continua o capítulo. " +
+                    "No capítulo seguinte, tenta a voz online novamente.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1352,7 +1350,7 @@ internal fun AzureSection(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Fall back to local voice when offline",
+                    "Continuar com voz instalada quando ficar sem internet",
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.weight(1f),
                 )
@@ -1363,7 +1361,7 @@ internal fun AzureSection(
             }
             if (fallbackEnabled) {
                 Text(
-                    "Fallback voice — pick from your installed local voices.",
+                    "Voz reserva — escolha uma das vozes instaladas.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1383,8 +1381,7 @@ internal fun AzureSection(
                 }
                 if (fallbackVoiceId == null) {
                     Text(
-                        "No fallback voice picked yet — toggle is on but " +
-                            "won't fire until you select one above.",
+                        "Escolha uma voz reserva acima para ativar esta proteção.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )

@@ -222,7 +222,9 @@ class VoiceManager @Inject constructor(
         val supertonicReady = isSupertonicSharedModelInstalled()
         VoiceCatalog.voicesWithAzureAndSystemTts(azureRoster, systemTtsRoster)
             .filter {
-                it.id in installedIds ||
+                (it.id in installedIds &&
+                    (it.engineType !is EngineType.Piper ||
+                        piperModelFilesPresent(it.id, it.sizeBytes))) ||
                     (it.engineType is EngineType.Kokoro && kokoroReady) ||
                     (it.engineType is EngineType.Kitten && kittenReady) ||
                     (it.engineType is EngineType.Supertonic && supertonicReady) ||
@@ -265,7 +267,9 @@ class VoiceManager @Inject constructor(
         val entry = VoiceCatalog.byIdWithAzureAndSystemTts(
             activeId, azureRoster, systemTtsRoster,
         ) ?: return@combine null
-        val isInstalled = activeId in installed ||
+        val isInstalled = (activeId in installed &&
+            (entry.engineType !is EngineType.Piper ||
+                piperModelFilesPresent(entry.id, entry.sizeBytes))) ||
             (entry.engineType is EngineType.Kokoro && isKokoroSharedModelInstalled()) ||
             (entry.engineType is EngineType.Kitten && isKittenSharedModelInstalled()) ||
             (entry.engineType is EngineType.Supertonic && isSupertonicSharedModelInstalled()) ||
@@ -293,13 +297,57 @@ class VoiceManager @Inject constructor(
             normalized, azureRoster, systemTtsRoster,
         ) ?: return null
         val installed = prefs[VoiceKeys.INSTALLED_IDS].orEmpty().map(::normalizeId).toSet()
-        val isInstalled = normalized in installed ||
+        val isInstalled = (normalized in installed &&
+            (entry.engineType !is EngineType.Piper ||
+                piperModelFilesPresent(entry.id, entry.sizeBytes))) ||
             (entry.engineType is EngineType.Kokoro && isKokoroSharedModelInstalled()) ||
             (entry.engineType is EngineType.Kitten && isKittenSharedModelInstalled()) ||
             (entry.engineType is EngineType.Supertonic && isSupertonicSharedModelInstalled()) ||
             entry.engineType is EngineType.Azure ||
             entry.engineType is EngineType.SystemTts
         return entry.toUiVoiceInfo(installed = isInstalled)
+    }
+
+    /**
+     * Picks a bounded, Portuguese-preserving fallback for playback without
+     * changing the user's selected voice. Local Piper models come first; if
+     * none remain, only an Android System TTS voice explicitly marked as
+     * offline-capable is eligible. Cloud voices and another language are
+     * never selected implicitly.
+     */
+    suspend fun bestOfflineFallback(
+        excludingIds: Set<String>,
+        preferredLanguage: String,
+        allowLocalPiper: Boolean,
+    ): UiVoiceInfo? {
+        val preferredBase = preferredLanguage.substringBefore('_').substringBefore('-')
+            .lowercase(java.util.Locale.ROOT)
+        val installed = installedVoices.first().filter { voice ->
+            voice.id !in excludingIds &&
+                voice.language.substringBefore('_').substringBefore('-')
+                    .lowercase(java.util.Locale.ROOT) == preferredBase
+        }
+
+        if (allowLocalPiper) {
+            installed.asSequence()
+                .filter { it.engineType is EngineType.Piper }
+                .sortedWith(
+                    compareByDescending<UiVoiceInfo> { it.qualityLevel.ordinal }
+                        .thenBy { it.displayName },
+                )
+                .firstOrNull()
+                ?.let { return it }
+        }
+
+        val offlineSystemIds = VoiceCatalog.systemTtsEntriesFromRoster(
+            systemTtsVoiceProvider.voices.first().filter { descriptor ->
+                !descriptor.isNetworkConnectionRequired &&
+                    !descriptor.requiresInternetConnection
+            },
+        ).mapTo(mutableSetOf()) { it.id }
+        return installed.firstOrNull { voice ->
+            voice.engineType is EngineType.SystemTts && voice.id in offlineSystemIds
+        }
     }
 
     /**
@@ -382,14 +430,19 @@ class VoiceManager @Inject constructor(
      * JNI path, so they're trivially present.
      */
     fun modelFilesPresent(voice: UiVoiceInfo): Boolean = when (voice.engineType) {
-        is EngineType.Piper -> {
-            val dir = voiceDirFor(voice.id)
-            File(dir, "model.onnx").exists() && File(dir, "tokens.txt").exists()
-        }
+        is EngineType.Piper -> piperModelFilesPresent(voice.id, voice.sizeBytes)
         is EngineType.Kokoro -> isKokoroSharedModelInstalled()
         is EngineType.Kitten -> isKittenSharedModelInstalled()
         is EngineType.Supertonic -> isSupertonicSharedModelInstalled()
         is EngineType.Azure, is EngineType.SystemTts -> true
+    }
+
+    private fun piperModelFilesPresent(voiceId: String, expectedModelBytes: Long): Boolean {
+        val dir = voiceDirFor(voiceId)
+        val model = File(dir, "model.onnx")
+        val tokens = File(dir, "tokens.txt")
+        return model.isFile && model.length() == expectedModelBytes &&
+            tokens.isFile && tokens.length() > 0L
     }
 
     sealed interface DownloadProgress {
@@ -651,12 +704,14 @@ class VoiceManager @Inject constructor(
                         url = piper.onnxUrl,
                         target = modelFile,
                         knownTotalBytes = entry.sizeBytes,
+                        expectedSha256 = piper.onnxSha256,
                     ) { bytesRead, total -> emit(DownloadProgress.Downloading(bytesRead, total)) }
                     // tokens.txt (~1 KB) — too small for gzip.
                     downloadFileRaw(
                         url = piper.tokensUrl,
                         target = File(voiceDir, "tokens.txt"),
                         knownTotalBytes = 0L,
+                        expectedSha256 = piper.tokensSha256,
                     ) { _, _ -> /* tokens file is small (~1KB) — no per-byte tick */ }
                     if (isLessac) {
                         android.util.Log.i("VoiceManager", "LESSAC_DOWNLOAD_END=${android.os.SystemClock.elapsedRealtime()}")
@@ -807,7 +862,8 @@ class VoiceManager @Inject constructor(
 
     // ----- internals -----
 
-    private suspend fun markInstalled(voiceId: String) {
+    @VisibleForTesting
+    internal suspend fun markInstalled(voiceId: String) {
         store.edit { prefs ->
             val ids = prefs[VoiceKeys.INSTALLED_IDS].orEmpty().toMutableSet()
             ids.add(voiceId)
@@ -847,6 +903,7 @@ class VoiceManager @Inject constructor(
         url: String,
         target: File,
         knownTotalBytes: Long,
+        expectedSha256: String? = null,
         crossinline onProgress: suspend (bytesRead: Long, totalBytes: Long) -> Unit,
     ) {
         val partial = target.partialDownloadFile()
@@ -884,7 +941,7 @@ class VoiceManager @Inject constructor(
                     }
                 }
             }
-            commitDownload(partial, target, knownTotalBytes)
+            commitDownload(partial, target, knownTotalBytes, expectedSha256)
             return
         }
         gzResponse.close()
@@ -892,7 +949,7 @@ class VoiceManager @Inject constructor(
 
         // Fallback: download uncompressed. Either the .gz asset hasn't
         // been uploaded yet, or the URL doesn't support it.
-        downloadFileRaw(url, target, knownTotalBytes, onProgress)
+        downloadFileRaw(url, target, knownTotalBytes, expectedSha256, onProgress)
     }
 
     /**
@@ -905,6 +962,7 @@ class VoiceManager @Inject constructor(
         url: String,
         target: File,
         knownTotalBytes: Long,
+        expectedSha256: String? = null,
         crossinline onProgress: suspend (bytesRead: Long, totalBytes: Long) -> Unit,
     ) {
         val partial = target.partialDownloadFile()
@@ -936,12 +994,17 @@ class VoiceManager @Inject constructor(
                 }
             }
         }
-        commitDownload(partial, target, knownTotalBytes)
+        commitDownload(partial, target, knownTotalBytes, expectedSha256)
     }
 
     private fun File.partialDownloadFile(): File = File(parentFile, "$name.part")
 
-    private fun commitDownload(partial: File, target: File, expectedBytes: Long) {
+    private fun commitDownload(
+        partial: File,
+        target: File,
+        expectedBytes: Long,
+        expectedSha256: String? = null,
+    ) {
         if (!partial.exists() || partial.length() <= 0L) {
             partial.delete()
             throw IOException("Downloaded file is empty: ${target.name}")
@@ -950,6 +1013,13 @@ class VoiceManager @Inject constructor(
             val actual = partial.length()
             partial.delete()
             throw IOException("Size mismatch for ${target.name}: expected $expectedBytes, wrote $actual")
+        }
+        if (expectedSha256 != null) {
+            val actual = partial.sha256()
+            if (!actual.equals(expectedSha256, ignoreCase = true)) {
+                partial.delete()
+                throw IOException("SHA-256 mismatch for ${target.name}")
+            }
         }
         try {
             Files.move(

@@ -226,6 +226,7 @@ fun SettingsHubScreen(
         onOpenReading = onOpenReading,
         onOpenVoicePlayback = onOpenVoicePlayback,
         onOpenVoiceLibrary = onOpenVoiceLibrary,
+        onOpenCloudVoices = onOpenCloudVoices,
         onOpenDownloads = onOpenDownloads,
         onOpenAdvanced = onOpenAdvanced,
         onOpenAbout = onOpenAbout,
@@ -566,6 +567,7 @@ private fun ReaderSettingsHub(
     onOpenReading: () -> Unit,
     onOpenVoicePlayback: () -> Unit,
     onOpenVoiceLibrary: () -> Unit,
+    onOpenCloudVoices: () -> Unit,
     onOpenDownloads: () -> Unit,
     onOpenAdvanced: () -> Unit,
     onOpenAbout: () -> Unit,
@@ -617,6 +619,12 @@ private fun ReaderSettingsHub(
                 title = stringResource(R.string.settings_hub_voice_library_title),
                 subtitle = stringResource(R.string.settings_hub_voice_library_subtitle),
                 onClick = onOpenVoiceLibrary,
+            )
+            SettingsHubRow(
+                icon = Icons.Outlined.Cloud,
+                title = stringResource(R.string.settings_hub_cloud_voices_title),
+                subtitle = stringResource(R.string.settings_hub_cloud_voices_subtitle),
+                onClick = onOpenCloudVoices,
             )
             SettingsHubRow(
                 icon = Icons.Outlined.Download,

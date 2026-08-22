@@ -8,75 +8,36 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Restructure (v0.5.40 + v0.5.48 partial revert + v0.5.72 Browse
- * promotion) — bottom-nav + primary-destination contract.
+ * Reader-flavor bottom-nav + primary-destination contract.
  *
- * v0.5.40 directive: "put settings in the main nav bar, and put follows
- * and browse into the library tab." Collapsed bottom nav to two primary
- * destinations (Library + Settings) and demoted Browse / Follows / Playing
- * / Voices to deep routes reached from inside Library (sub-tabs) or
- * drill-down.
+ * Phase 3 deliberately reduced the dock to the three reader tasks that remain
+ * first-class: Library, Downloads and Settings. Historical source, notes and
+ * discovery routes may still resolve as deep links, but they are not tabs.
  *
- * v0.5.48 partial revert (JP feedback 2026-05-15): Playing + Voices
- * restored as primary destinations. Browse + Follows stayed as Library
- * sub-tabs. Dock was `Playing | Library | Voices | Settings`.
- *
- * v0.5.72 — Browse promoted to first-class bottom-nav destination
- * (compass icon, magical hero source carousel inside). Dock is now
- * `Playing | Library | Browse | Voices | Settings` — five tabs.
- * Follows stays under the Library umbrella (per-user scope).
- *
- * These tests pin the contract so a future refactor that removes the
- * Browse pill or changes the dock ordering fails here first. Plain
+ * These tests pin the contract so a future refactor that adds a historical
+ * tab back or changes the dock ordering fails here first. Plain
  * JUnit (no Robolectric): we're only inspecting enum + route-string
  * state, not any Android framework objects.
  */
 class NavStructureTest {
 
     @Test
-    fun `bottom nav exposes exactly five primary destinations`() {
-        // Phone dock = the tabs with inBottomBar=true. Voice Notes (#1657)
-        // kept the bar at five: Notes is RAIL-ONLY. Notes still lives in
-        // HomeTab (so HomeTab.entries is 6, driving the tablet SideNavRail),
-        // but it's excluded from the phone BottomTabBar — six pills crowd the
-        // Flip3's ~260 dp cover. Phones reach Notes via the Library top-bar
-        // waveform action instead (onOpenNotes → NOTES). See the `rail-only`
-        // and `Library top-bar` tests below.
-        assertEquals(5, HomeTab.entries.count { it.inBottomBar })
-        // The rail still carries all six (the five dock tabs + Notes).
-        assertEquals(6, HomeTab.entries.size)
+    fun `bottom nav exposes exactly three primary destinations`() {
+        assertEquals(3, HomeTab.entries.count { it.inBottomBar })
+        assertEquals(3, HomeTab.entries.size)
     }
 
     @Test
-    fun `bottom nav primary destinations are Playing Library Browse Voices Settings`() {
-        // Order matters — BottomTabBar uses ordinal to position the indicator
-        // pill. Playing leads (most-touched during a listening session);
-        // Library second (cold-launch landing); Browse third (discovery
-        // between "your shelves" and "playback ops"); Voices fourth; Settings
-        // always last. (Notes is rail-only, not in this dock — see below.)
+    fun `bottom nav primary destinations are Biblioteca Downloads Configuracoes`() {
         val bottomBar = HomeTab.entries.filter { it.inBottomBar }.map { it.label }
-        assertEquals(listOf("Playing", "Library", "Browse", "Voices", "Settings"), bottomBar)
-        assertEquals(HomeTab.Playing, HomeTab.entries.first())
+        assertEquals(listOf("Biblioteca", "Downloads", "Configurações"), bottomBar)
+        assertEquals(HomeTab.Library, HomeTab.entries.first())
         assertEquals(HomeTab.Settings, HomeTab.entries.last())
     }
 
     @Test
-    fun `Notes is a rail-only destination, not a phone bottom-bar tab`() {
-        // #1657 — Notes stays first-class via the tablet SideNavRail + the
-        // NOTES route, but is deliberately excluded from the phone
-        // BottomTabBar (indicator-pill density on the Flip3 cover). Phones
-        // reach it via the Library top-bar waveform action (onOpenNotes). This
-        // pins the decision so re-adding Notes to the dock is a conscious change.
-        assertTrue("Notes still exists for the rail", HomeTab.entries.contains(HomeTab.Notes))
-        assertFalse("Notes is excluded from the phone dock", HomeTab.Notes.inBottomBar)
-    }
-
-    @Test
-    fun `every non-Notes tab still renders in the phone bottom bar`() {
-        // The rail-only carve-out is Notes and Notes alone — every other
-        // HomeTab must stay a phone dock pill. Guards against a future tab
-        // accidentally inheriting inBottomBar=false and vanishing from phones.
-        HomeTab.entries.filter { it != HomeTab.Notes }.forEach {
+    fun `every reader tab renders in the phone bottom bar`() {
+        HomeTab.entries.forEach {
             assertTrue("${it.name} must render in the phone bottom bar", it.inBottomBar)
         }
     }
@@ -93,14 +54,9 @@ class NavStructureTest {
     }
 
     @Test
-    fun `Browse is now a first-class bottom-nav destination (v0_5_72)`() {
-        // Pinned alongside the order assertion above so a regression
-        // that drops Browse from the dock fails this test by name (not
-        // just the order assertion). Browse was a Library sub-tab in
-        // v0.5.40–v0.5.71; v0.5.72 gave it its own pill with the
-        // compass icon and a magical hero source carousel inside.
-        assertNotNull(HomeTab.entries.firstOrNull { it == HomeTab.Browse })
-        assertEquals("Browse", HomeTab.Browse.label)
+    fun `Downloads is a first-class reader destination`() {
+        assertNotNull(HomeTab.entries.firstOrNull { it == HomeTab.Downloads })
+        assertEquals("Downloads", HomeTab.Downloads.label)
     }
 
     @Test

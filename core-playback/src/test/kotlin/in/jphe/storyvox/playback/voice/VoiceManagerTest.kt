@@ -3,6 +3,8 @@ package `in`.jphe.storyvox.playback.voice
 import android.app.Application
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
+import java.io.RandomAccessFile
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPOutputStream
@@ -69,7 +71,7 @@ import org.robolectric.annotation.Config
  * vanilla Application context the runner provides.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(application = Application::class)
+@Config(application = Application::class, sdk = [35])
 class VoiceManagerTest {
 
     private lateinit var context: Application
@@ -276,16 +278,9 @@ class VoiceManagerTest {
         )
     }
 
-    /**
-     * Issue #119 — Kitten download Resolving→…→Done shape with a happy-
-     * path 200. Mirrors Kokoro's shape test. With a 200 OkHttpClient
-     * returning a small body, all three asset fetches (model, voices,
-     * tokens) succeed, the markInstalled call lands, and the terminal
-     * Done emits. Catches regressions like a missing branch in the
-     * `when (engineType)` block silently falling through to a no-op.
-     */
+    /** A short HTTP 200 body is still corrupt and must never be installed. */
     @Test
-    fun kitten_happyPath_emitsResolvingDownloadingDone() = runBlocking {
+    fun kitten_truncatedPayload_emitsFailedAndCleansSharedDir() = runBlocking {
         val vm = VoiceManager(context, EmptyAzureProvider, EmptySystemTtsProvider)
         // 16 KiB body — small enough to keep the test fast, big enough
         // that the OkHttp body iterator emits at least one Downloading
@@ -303,18 +298,12 @@ class VoiceManagerTest {
             progress.any { it is VoiceManager.DownloadProgress.Downloading },
         )
         assertTrue(
-            "last emission must be Done, got ${progress.lastOrNull()}",
-            progress.last() is VoiceManager.DownloadProgress.Done,
+            "last emission must be Failed, got ${progress.lastOrNull()}",
+            progress.last() is VoiceManager.DownloadProgress.Failed,
         )
 
-        // Shared dir + the three asset files exist after Done — the
-        // engine load path will find them in place when EnginePlayer
-        // resolves `kittenSharedDir() / "model.onnx"` etc.
         val sharedDir = vm.kittenSharedDir()
-        assertTrue("shared dir should exist", sharedDir.exists())
-        assertTrue("model.onnx should land", File(sharedDir, "model.onnx").exists())
-        assertTrue("voices.bin should land", File(sharedDir, "voices.bin").exists())
-        assertTrue("tokens.txt should land", File(sharedDir, "tokens.txt").exists())
+        assertFalse("truncated Kitten bundle must be cleaned", sharedDir.exists())
     }
 
     // ----- helpers -----
@@ -340,6 +329,13 @@ class VoiceManagerTest {
      *  tests don't exercise System TTS paths. */
     private object EmptySystemTtsProvider : SystemTtsVoiceProvider {
         override val voices: Flow<List<SystemTtsVoiceDescriptor>> = flowOf(emptyList())
+        override suspend fun refresh() = Unit
+    }
+
+    private class FixedSystemTtsProvider(
+        roster: List<SystemTtsVoiceDescriptor>,
+    ) : SystemTtsVoiceProvider {
+        override val voices: Flow<List<SystemTtsVoiceDescriptor>> = flowOf(roster)
         override suspend fun refresh() = Unit
     }
 
@@ -392,6 +388,108 @@ class VoiceManagerTest {
             .build()
 
     // ---- Issue #1112: gzip download + fallback tests ----
+
+    @Test
+    fun modelFilesPresent_rejectsTruncatedPiperModel() = runBlocking {
+        val vm = VoiceManager(context, EmptyAzureProvider, EmptySystemTtsProvider)
+        val voice = requireNotNull(vm.voiceById("piper_faber_pt_BR_medium"))
+        val dir = vm.voiceDirFor(voice.id).also { it.mkdirs() }
+        File(dir, "tokens.txt").writeText("token")
+        RandomAccessFile(File(dir, "model.onnx"), "rw").use { it.setLength(voice.sizeBytes / 2) }
+
+        assertFalse(vm.modelFilesPresent(voice))
+
+        RandomAccessFile(File(dir, "model.onnx"), "rw").use { it.setLength(voice.sizeBytes) }
+        assertTrue(vm.modelFilesPresent(voice))
+    }
+
+    @Test
+    fun bestOfflineFallback_prefersOtherInstalledPtBrPiper() = runBlocking {
+        val vm = VoiceManager(context, EmptyAzureProvider, EmptySystemTtsProvider)
+        val faber = requireNotNull(vm.voiceById("piper_faber_pt_BR_medium"))
+        val dii = requireNotNull(vm.voiceById("piper_dii_pt_BR_high"))
+        listOf(faber, dii).forEach { voice ->
+            val dir = vm.voiceDirFor(voice.id).also { it.mkdirs() }
+            File(dir, "tokens.txt").writeText("token")
+            RandomAccessFile(File(dir, "model.onnx"), "rw").use {
+                it.setLength(voice.sizeBytes)
+            }
+            vm.markInstalled(voice.id)
+        }
+
+        val fallback = vm.bestOfflineFallback(
+            excludingIds = setOf(faber.id),
+            preferredLanguage = "pt-BR",
+            allowLocalPiper = true,
+        )
+
+        assertEquals(dii.id, fallback?.id)
+    }
+
+    @Test
+    fun bestOfflineFallback_usesOnlyOfflineSystemTtsInSameLanguage() = runBlocking {
+        val offlinePt = SystemTtsVoiceDescriptor(
+            engineName = "offline.engine",
+            engineLabel = "Offline",
+            voiceName = "pt-br-offline",
+            displayName = "Português offline",
+            locale = "pt-BR",
+            isNetworkConnectionRequired = false,
+        )
+        val networkPt = offlinePt.copy(
+            engineName = "network.engine",
+            voiceName = "pt-br-network",
+            displayName = "Português online",
+            isNetworkConnectionRequired = true,
+        )
+        val offlineEnglish = offlinePt.copy(
+            engineName = "english.engine",
+            voiceName = "en-us-offline",
+            displayName = "English offline",
+            locale = "en-US",
+        )
+        val vm = VoiceManager(
+            context,
+            EmptyAzureProvider,
+            FixedSystemTtsProvider(listOf(networkPt, offlineEnglish, offlinePt)),
+        )
+
+        val fallback = vm.bestOfflineFallback(
+            excludingIds = emptySet(),
+            preferredLanguage = "pt_BR",
+            allowLocalPiper = false,
+        )
+
+        assertNotNull(fallback)
+        assertEquals("pt_BR", fallback?.language)
+        assertEquals(
+            EngineType.SystemTts("offline.engine", "pt-br-offline"),
+            fallback?.engineType,
+        )
+    }
+
+    @Test
+    fun downloadFile_shaMismatch_doesNotCommitTarget() = runBlocking {
+        val payload = "valid model bytes".encodeToByteArray()
+        val vm = VoiceManager(context, EmptyAzureProvider, EmptySystemTtsProvider)
+        vm.http = httpClientWithGzSupport(payload)
+        val target = File(voicesRoot, "bad_hash.onnx").also { voicesRoot.mkdirs() }
+
+        try {
+            vm.downloadFile(
+                url = "https://example.com/bad-hash.onnx",
+                target = target,
+                knownTotalBytes = payload.size.toLong(),
+                expectedSha256 = "0".repeat(64),
+            ) { _, _ -> }
+            throw AssertionError("SHA-256 mismatch should fail")
+        } catch (expected: IOException) {
+            assertTrue(expected.message.orEmpty().contains("SHA-256 mismatch"))
+        }
+
+        assertFalse(target.exists())
+        assertFalse(File(target.parentFile, "${target.name}.part").exists())
+    }
 
     /**
      * Issue #1112 — when the server has a `.gz` variant, downloadFile
@@ -447,13 +545,9 @@ class VoiceManagerTest {
         )
     }
 
-    /**
-     * Issue #1112 — Piper happy-path with gzip-aware download. Confirms
-     * that the full Piper download flow (model.onnx via gzip + tokens.txt
-     * raw) lands both files and emits Resolving → Downloading → Done.
-     */
+    /** Gzip transport does not bypass the declared uncompressed-size check. */
     @Test
-    fun piper_happyPath_withGzipDownload() = runBlocking {
+    fun piper_truncatedGzipPayload_emitsFailedAndCleansVoiceDir() = runBlocking {
         val modelPayload = ByteArray(16 * 1024) { (it % 200).toByte() }
         val vm = VoiceManager(context, EmptyAzureProvider, EmptySystemTtsProvider)
         vm.http = httpClientWithGzSupport(modelPayload)
@@ -466,13 +560,12 @@ class VoiceManagerTest {
             progress.first() is VoiceManager.DownloadProgress.Resolving,
         )
         assertTrue(
-            "last emission must be Done",
-            progress.last() is VoiceManager.DownloadProgress.Done,
+            "last emission must be Failed",
+            progress.last() is VoiceManager.DownloadProgress.Failed,
         )
 
         val voiceDir = vm.voiceDirFor(voiceId)
-        assertTrue("model.onnx should exist", File(voiceDir, "model.onnx").exists())
-        assertTrue("tokens.txt should exist", File(voiceDir, "tokens.txt").exists())
+        assertFalse("truncated Piper directory must be cleaned", voiceDir.exists())
     }
 
     // ---- gzip-aware interceptor helpers ----

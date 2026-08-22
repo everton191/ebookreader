@@ -9,9 +9,9 @@ import org.junit.Test
 /**
  * Issue #440 — smoke contract for the Settings hub row catalog.
  *
- * The hub composable [SettingsHubScreen] renders one row per
- * [SettingsHubSection] in [SettingsHubSections]. The list is the
- * source of truth for what shows up on the gear-icon landing page;
+ * The legacy/non-reader hub renders one row per [SettingsHubSection] in
+ * [SettingsHubSections]. The Reader flavor has a separate compact hub. This
+ * list is the source of truth for the legacy gear-icon landing page;
  * removing a row here (or breaking its title/subtitle) silently
  * drops a navigation entry, so this test pins the shape.
  *
@@ -28,29 +28,11 @@ class SettingsHubSectionsTest {
 
     @Test
     fun `hub catalog renders all sections in fixed order`() {
-        // 20 named sections + 1 escape hatch ("All settings"). The
-        // count bumped 13 → 14 in v0.5.42 (Accessibility scaffold);
-        // 14 → 15 in v0.5.59 (Appearance / book cover style); 15 →
-        // 16 in the v1 settings-bundle-7 (Advanced subscreen — #598
-        // Android Auto bucket size and future integration tunables);
-        // 16 → 17 in #1235 (Listening stats dashboard); 17 → 20 in
-        // #1577, which catalogued the three rows the composable already
-        // rendered but the catalog had drifted from — Morning Briefing
-        // (#1467), Scripts (#1369), and Bookshare (#1471). That drift
-        // meant a search hitting only those rows still showed a false
-        // "No results" line, since the message reads the catalog.
-        // 20 → 21 in #1624, which grouped the hub and exposed the Cloud
-        // Voices row (its subscreen + route already shipped, but the hub
-        // had no way in — you had to dig through Plugins → Azure).
-        // 21 → 22 in #1630, which added the Content Sources row (the
-        // per-source config seam, un-buried from the legacy monolith).
-        // 22 → 23 in #1632, which added the Downloads & Storage group + row.
-        // 23 → 24 in #1634, which added the Benefits row to the Tools group.
-        // 24 → 25 in #1631, which added the Notifications group + row (the
-        // buried inboxNotify* toggles + a system-permission affordance).
-        // Adding a new section requires updating both this assertion AND
-        // the composable's row list — that drift is the point of pinning.
-        assertEquals(25, SettingsHubSections.size)
+        // The legacy searchable hub currently contains 21 named sections plus
+        // the "All settings" escape hatch. The Reader flavor uses its own
+        // deliberately compact hub and is validated by its navigation route
+        // contract, so reader-only rows must not inflate this legacy catalog.
+        assertEquals(22, SettingsHubSections.size)
     }
 
     @Test
@@ -63,7 +45,6 @@ class SettingsHubSectionsTest {
             "Voice & Playback",
             "Reading",
             "Performance",
-            "AI",
             // Phase 1 scaffold landed in v0.5.42; the hub row is the
             // entry point. Pin it here so a regression that drops the
             // row surfaces in this suite too.
@@ -78,10 +59,6 @@ class SettingsHubSectionsTest {
             "Advanced",
             "Developer",
             "About",
-            // #1624 — Cloud Voices exposed as a hub row (was reachable only
-            // via Plugins → Azure → Configure). Pin it so a regression can't
-            // silently drop it back into invisibility.
-            "Cloud Voices",
             // #1630 — Content Sources subscreen (per-source config seam),
             // un-buried from the legacy monolith into the Content & Sources group.
             "Content Sources",

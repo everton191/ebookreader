@@ -121,6 +121,36 @@ object VoiceCatalog {
     // static roster — [voices] composes these in display order.
     internal fun piperEntries(): List<CatalogEntry> = listOf(
         CatalogEntry(
+            id = "piper_dii_pt_BR_high",
+            displayName = "Dii Brasil",
+            language = "pt_BR",
+            sizeBytes = 63_511_201L,
+            qualityLevel = QualityLevel.High,
+            engineType = EngineType.Piper,
+            piper = PiperPaths(
+                onnxUrl = "https://huggingface.co/csukuangfj/vits-piper-pt_BR-dii-high/resolve/main/pt_BR-dii-high.onnx",
+                tokensUrl = "https://huggingface.co/csukuangfj/vits-piper-pt_BR-dii-high/resolve/main/tokens.txt",
+                onnxSha256 = "0238b83d2c6f4a6690a256303cccd34e35aa28f1ee08cb53af6addb70c0401a7",
+                tokensSha256 = "620e1aecf1a68fea3ba5850d137b0138fa2037c9b372dad13b95a2a215d0849a",
+            ),
+            gender = VoiceGender.Female,
+        ),
+        CatalogEntry(
+            id = "piper_faber_pt_BR_medium",
+            displayName = "Faber Brasil",
+            language = "pt_BR",
+            sizeBytes = 63_201_428L,
+            qualityLevel = QualityLevel.Medium,
+            engineType = EngineType.Piper,
+            piper = PiperPaths(
+                onnxUrl = "https://huggingface.co/csukuangfj/vits-piper-pt_BR-faber-medium/resolve/main/pt_BR-faber-medium.onnx",
+                tokensUrl = "https://huggingface.co/csukuangfj/vits-piper-pt_BR-faber-medium/resolve/main/tokens.txt",
+                onnxSha256 = "39fb6b580d6d40a3230b7a9d0851d282074537b9694892b5b3cd90ff87c6cbb3",
+                tokensSha256 = "2619c1a9de1bcf928162f40c583caf39368cfd6b2340c7bcad51dc634411ec36",
+            ),
+            gender = VoiceGender.Male,
+        ),
+        CatalogEntry(
             id = "piper_lessac_en_US_high",
             displayName = "Lessac",
             language = "en_US",
@@ -779,9 +809,12 @@ object VoiceCatalog {
             kokoro("kokoro_nezumi_ja_JP_39", "Nezumi", "ja_JP", 39, F),
             kokoro("kokoro_tebukuro_ja_JP_40", "Tebukuro", "ja_JP", 40, F),
             kokoro("kokoro_kumo_ja_JP_41", "Kumo", "ja_JP", 41, M),
-            kokoro("kokoro_dora_pt_PT_42", "Dora", "pt_PT", 42, F),
-            kokoro("kokoro_alex_pt_PT_43", "Alex", "pt_PT", 43, M),
-            kokoro("kokoro_santa_pt_PT_44", "Santa", "pt_PT", 44, M),
+            // Kokoro's pf_ / pm_ speaker family uses language code `p`,
+            // documented upstream as Brazilian Portuguese. Keep the legacy
+            // ids for persisted-selection compatibility, but expose pt_BR.
+            kokoro("kokoro_dora_pt_PT_42", "Dora Brasil", "pt_BR", 42, F),
+            kokoro("kokoro_alex_pt_PT_43", "Alex Brasil", "pt_BR", 43, M),
+            kokoro("kokoro_santa_pt_PT_44", "Santa Brasil", "pt_BR", 44, M),
             kokoro("kokoro_xiaobei_zh_CN_45", "Xiaobei", "zh_CN", 45, F),
             kokoro("kokoro_xiaoni_zh_CN_46", "Xiaoni", "zh_CN", 46, F),
             kokoro("kokoro_xiaoxiao_zh_CN_47", "Xiaoxiao", "zh_CN", 47, F),
@@ -1078,7 +1111,13 @@ data class CatalogEntry(
     val gender: VoiceGender = VoiceGender.Unknown,
 )
 
-data class PiperPaths(val onnxUrl: String, val tokensUrl: String)
+data class PiperPaths(
+    val onnxUrl: String,
+    val tokensUrl: String,
+    /** Optional integrity pins. Legacy catalog rows remain size-validated. */
+    val onnxSha256: String? = null,
+    val tokensSha256: String? = null,
+)
 
 /**
  * Per-million-character billing for a cloud TTS voice. Stored as

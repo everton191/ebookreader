@@ -12,6 +12,11 @@
     <string name="settings_hub_voice_playback_subtitle">Voz, velocidade e timer para dormir.</string>
     <string name="settings_hub_voice_library_title">Vozes</string>
     <string name="settings_hub_voice_library_subtitle">Vozes instaladas, disponíveis e do sistema.</string>
+    <string name="settings_hub_cloud_voices_title">Vozes online</string>
+    <string name="settings_hub_cloud_voices_subtitle">Vozes neurais brasileiras do Azure · plano gratuito opcional.</string>
+    <string name="settings_cloud_voices_title">Vozes online</string>
+    <string name="settings_section_cloud_voices_label">Vozes online</string>
+    <string name="settings_section_cloud_voices_descriptor">Vozes neurais brasileiras do Azure com sua própria chave.</string>
     <string name="settings_hub_downloads_title">Downloads e armazenamento</string>
     <string name="settings_hub_downloads_subtitle">Downloads, Wi-Fi, atualizações e cache.</string>
     <string name="settings_hub_advanced_title">Avançado</string>

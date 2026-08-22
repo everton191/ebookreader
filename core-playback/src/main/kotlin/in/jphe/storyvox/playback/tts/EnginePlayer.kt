@@ -49,6 +49,7 @@ import `in`.jphe.storyvox.playback.SentenceRange
 import `in`.jphe.storyvox.playback.SleepTimer
 import `in`.jphe.storyvox.playback.ThermalMonitor
 import `in`.jphe.storyvox.playback.TtsVolumeRamp
+import `in`.jphe.storyvox.playback.VoiceEngineQualityBridge
 import `in`.jphe.storyvox.playback.cache.EngineMutex
 import `in`.jphe.storyvox.playback.cache.PcmAppenderLease
 import `in`.jphe.storyvox.playback.cache.PcmCache
@@ -417,6 +418,18 @@ internal fun shouldRebuildForVoiceChange(
     return true
 }
 
+/** A restored pipeline must never resume audio rendered for another voice. */
+internal fun requiresVoiceReload(selectedVoiceId: String?, loadedVoiceId: String?): Boolean =
+    selectedVoiceId != null && selectedVoiceId != loadedVoiceId
+
+/** Kokoro's `p` speaker family is Brazilian Portuguese, not pt-PT. */
+internal fun kokoroNativePhonemizerLanguage(language: String?): String? =
+    language
+        ?.replace('-', '_')
+        ?.substringBefore('_')
+        ?.lowercase()
+        ?.takeIf { it in setOf("en", "es", "fr", "pt", "it", "de", "hi", "zh", "ja") }
+
 /**
  * Issue #1330 — the fiction id the player should expose in [PlaybackState]
  * while a [chapter] is loaded. The chapter's [PlaybackChapter.fictionId] is
@@ -612,6 +625,8 @@ class EnginePlayer @AssistedInject constructor(
      *  guarantees those threads see the latest loaded voice rather than a
      *  stale cached reference. */
     @Volatile private var loadedVoiceId: String? = null
+    /** Latest DataStore-backed selection, independent from the loaded model. */
+    @Volatile private var selectedVoiceId: String? = null
     @Volatile private var loadedVoiceLanguage: String? = null
     /** Phase 4 baseline: monotonic timestamp from the user's play request to
      * the first AudioTrack.play() for that request. Reset after one sample. */
@@ -1255,6 +1270,12 @@ class EnginePlayer @AssistedInject constructor(
         scope.launch {
             voiceManager.activeVoice.collect { active ->
                 val newId = active?.id ?: return@collect
+                selectedVoiceId = newId
+                if (active.engineType is EngineType.Kokoro) {
+                    kokoroNativePhonemizerLanguage(active.language)?.let(
+                        VoiceEngineQualityBridge::applyPhonemizerLang,
+                    )
+                }
                 if (newId == loadedVoiceId) {
                     // No-op flip — typically the user re-activated the same
                     // voice, or DataStore re-emitted the persisted value. If
@@ -2074,8 +2095,7 @@ class EnginePlayer @AssistedInject constructor(
         val pinnedNarrator = fictionRepo.pinnedVoiceId(fictionId)
             ?.let { voiceManager.voiceById(it) }
             ?.takeIf { it.isInstalled }
-        val active = pinnedNarrator ?: voiceManager.activeVoice.first()
-        if (active == null) {
+        var active = pinnedNarrator ?: voiceManager.activeVoice.first() ?: run {
             _observableState.update {
                 it.copy(isPlaying = false, error = PlaybackError.EngineUnavailable)
             }
@@ -2275,8 +2295,19 @@ class EnginePlayer @AssistedInject constructor(
             return@withLock
         }
 
-        val phase4ModelLoadStart = android.os.SystemClock.elapsedRealtime()
-        val loadResult: String = withContext(Dispatchers.IO) {
+        val fallbackPolicy = TtsFallbackPolicy()
+        val attemptedVoiceIds = mutableSetOf<String>()
+        var localFallbackUsed = false
+        var loadResult: String
+        modelLoadLoop@ while (true) {
+            var primaryAttempts = 0
+            do {
+                val phase4ModelLoadStart = android.os.SystemClock.elapsedRealtime()
+                loadResult = try {
+                    kotlinx.coroutines.withTimeoutOrNull(
+                        fallbackPolicy.timeoutForAttempt(primaryAttempts),
+                    ) {
+                        withContext(Dispatchers.IO) {
             // Critical: serialize loadModel against in-flight generateAudioPCM
             // by holding engineMutex (issue #11). Without it, a Piper-to-Piper
             // swap can call loadModel().destroy() and free the native `tts`
@@ -2612,14 +2643,53 @@ class EnginePlayer @AssistedInject constructor(
                         }
                     }
                 }
-            }
+                            }
+                        }
+                    } ?: "Error: model load timed out"
+                } catch (t: Throwable) {
+                    if (t is kotlinx.coroutines.CancellationException) throw t
+                    "Error: ${t.message ?: t.javaClass.simpleName}"
+                }
+                Phase4TtsMetrics.recordModelLoad(
+                    engine = active.engineType.toString(),
+                    voice = active.id,
+                    elapsedMs = android.os.SystemClock.elapsedRealtime() - phase4ModelLoadStart,
+                    reused = false,
+                )
+                primaryAttempts++
+            } while (
+                loadResult != "Success" &&
+                    fallbackPolicy.nextAction(
+                        primaryAttempts = primaryAttempts,
+                        localFallbackAvailable = false,
+                        systemTtsAvailable = false,
+                    ) == TtsFallbackPolicy.Action.TRY_PRIMARY
+            )
+
+            if (loadResult == "Success") break@modelLoadLoop
+
+            attemptedVoiceIds += active.id
+            // Azure authentication/configuration failures must stay visible to
+            // the user. Its existing synth-time fallback handles only network,
+            // service and quota failures when the user opted in; silently
+            // replacing a rejected key here would hide a configuration error.
+            if (active.engineType is EngineType.Azure) break@modelLoadLoop
+            val fallback = voiceManager.bestOfflineFallback(
+                excludingIds = attemptedVoiceIds,
+                preferredLanguage = active.language,
+                allowLocalPiper = !localFallbackUsed,
+            )
+            if (fallback == null) break@modelLoadLoop
+
+            if (fallback.engineType is EngineType.Piper) localFallbackUsed = true
+            Phase4TtsMetrics.recordFallback(active.id, fallback.id)
+            android.util.Log.w(
+                "EnginePlayer",
+                "Voice ${active.id} failed after $primaryAttempts attempts: $loadResult; " +
+                    "using offline fallback ${fallback.id}",
+            )
+            active = fallback
         }
-        Phase4TtsMetrics.recordModelLoad(
-            engine = active.engineType.toString(),
-            voice = active.id,
-            elapsedMs = android.os.SystemClock.elapsedRealtime() - phase4ModelLoadStart,
-            reused = false,
-        )
         if (loadResult != "Success") {
             _observableState.update {
                 it.copy(
@@ -4576,6 +4646,12 @@ class EnginePlayer @AssistedInject constructor(
             return
         }
         if (sentences.isEmpty()) return
+        // Process/session restore may recreate a paused track before there is
+        // a chapter for observeActiveVoice() to reload. Compare the selected
+        // voice with the model/cache that built the track before fast resume.
+        if (requiresVoiceReload(selectedVoiceId, loadedVoiceId)) {
+            voiceReloadPending = true
+        }
         // If the user activated a different voice while paused (#8), the
         // existing engine model is the wrong one — route through loadAndPlay
         // to swap it before any audio comes out.
