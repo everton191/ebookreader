@@ -228,6 +228,7 @@ fun SettingsHubScreen(
         onOpenVoiceLibrary = onOpenVoiceLibrary,
         onOpenCloudVoices = onOpenCloudVoices,
         onOpenDownloads = onOpenDownloads,
+        onOpenAi = onOpenAi,
         onOpenAdvanced = onOpenAdvanced,
         onOpenAbout = onOpenAbout,
     )
@@ -569,6 +570,7 @@ private fun ReaderSettingsHub(
     onOpenVoiceLibrary: () -> Unit,
     onOpenCloudVoices: () -> Unit,
     onOpenDownloads: () -> Unit,
+    onOpenAi: () -> Unit,
     onOpenAdvanced: () -> Unit,
     onOpenAbout: () -> Unit,
 ) {
@@ -632,15 +634,11 @@ private fun ReaderSettingsHub(
                 subtitle = stringResource(R.string.settings_hub_downloads_subtitle),
                 onClick = onOpenDownloads,
             )
-            Text(
-                text = stringResource(R.string.settings_local_ai_title),
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(start = spacing.md, top = spacing.md),
-            )
-            Text(
-                text = stringResource(R.string.settings_local_ai_empty),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = spacing.md, vertical = spacing.sm),
+            SettingsHubRow(
+                icon = Icons.Outlined.AutoAwesome,
+                title = stringResource(R.string.settings_local_ai_title),
+                subtitle = stringResource(R.string.settings_local_ai_empty),
+                onClick = onOpenAi,
             )
             SettingsHubRow(
                 icon = Icons.Outlined.Tune,
