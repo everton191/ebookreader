@@ -117,6 +117,10 @@ object VoiceCatalog {
     fun isBrazilianPortuguese(entry: CatalogEntry): Boolean =
         entry.language.equals("pt_BR", ignoreCase = true) ||
             entry.language.equals("pt-BR", ignoreCase = true)
+
+    /** Only these Piper models have been selected for Brazilian narration. */
+    fun isBrazilianPiper(entry: CatalogEntry): Boolean =
+        isBrazilianPortuguese(entry) && entry.engineType is EngineType.Piper
     // #1372 — `internal` (was `private`) so each in-process
     // `VoiceEnginePlugin.catalogEntries()` can delegate here; the union
     // across plugins reproduces [voices]. Still the single source of the

@@ -47,6 +47,7 @@ private val Context.voicesSettingsStore: DataStore<Preferences> by preferencesDa
 
 /** Small enough to keep a download responsive while yielding CPU/network to TTS. */
 private const val DOWNLOAD_THROTTLE_MS = 125L
+private const val BRAZILIAN_PIPER_FALLBACK_ID = "piper_faber_pt_BR_medium"
 
 private object VoiceKeys {
     val INSTALLED_IDS = stringSetPreferencesKey("installed_voice_ids")
@@ -135,7 +136,27 @@ class VoiceManager @Inject constructor(
         // INT8→fp32 catalog repoint to preserve persisted state, but it's
         // misleading (the files have been fp32 since v0.4.12). Strip it
         // from DataStore + rename matching voice directories.
-        migrationScope.launch { migrateInt8VoiceIds() }
+        migrationScope.launch {
+            migrateInt8VoiceIds()
+            replaceForeignSoundingActiveVoice()
+        }
+    }
+
+    /**
+     * Older releases exposed shared Kokoro speakers as Brazilian Portuguese.
+     * They can still sound foreign on Portuguese text, so move an already
+     * installed affected selection to the verified local Piper fallback.
+     */
+    private suspend fun replaceForeignSoundingActiveVoice() {
+        val fallback = VoiceCatalog.byId(BRAZILIAN_PIPER_FALLBACK_ID) ?: return
+        if (!piperModelFilesPresent(fallback.id, fallback.sizeBytes)) return
+        store.edit { prefs ->
+            val activeId = prefs[VoiceKeys.ACTIVE_ID]?.let(::normalizeId) ?: return@edit
+            val active = VoiceCatalog.byId(activeId) ?: return@edit
+            if (!VoiceCatalog.isBrazilianPiper(active)) {
+                prefs[VoiceKeys.ACTIVE_ID] = BRAZILIAN_PIPER_FALLBACK_ID
+            }
+        }
     }
 
     private suspend fun migrateInt8VoiceIds() {
@@ -199,7 +220,7 @@ class VoiceManager @Inject constructor(
      *  [availableVoicesFlow] instead. */
     val availableVoices: List<UiVoiceInfo>
         get() = VoiceCatalog.voices
-            .filter(VoiceCatalog::isBrazilianPortuguese)
+            .filter(VoiceCatalog::isBrazilianPiper)
             .map { it.toUiVoiceInfo(installed = false) }
 
     /** Hot Flow of [availableVoices] — combines the static catalog
@@ -209,7 +230,7 @@ class VoiceManager @Inject constructor(
     val availableVoicesFlow: Flow<List<UiVoiceInfo>> =
         azureVoiceProvider.voices.combine(systemTtsVoiceProvider.voices) { azure, system ->
             VoiceCatalog.voicesWithAzureAndSystemTts(azure, system)
-                .filter(VoiceCatalog::isBrazilianPortuguese)
+                .filter(VoiceCatalog::isBrazilianPiper)
                 .map { it.toUiVoiceInfo(installed = false) }
         }
 
@@ -242,6 +263,8 @@ class VoiceManager @Inject constructor(
         // presence makes every Supertonic speaker playable.
         val supertonicReady = isSupertonicSharedModelInstalled()
         VoiceCatalog.voicesWithAzureAndSystemTts(azureRoster, systemTtsRoster)
+            // Keep Brazilian system TTS in this internal installed snapshot:
+            // bestOfflineFallback uses it only if no Piper can be used.
             .filter(VoiceCatalog::isBrazilianPortuguese)
             .filter {
                 (it.id in installedIds &&
