@@ -13,6 +13,7 @@ import com.CodeBySonu.VoxSherpa.SupertonicEngine
 import dagger.hilt.android.qualifiers.ApplicationContext
 import `in`.jphe.storyvox.data.source.AzureVoiceProvider
 import `in`.jphe.storyvox.data.source.SystemTtsVoiceProvider
+import `in`.jphe.storyvox.playback.PlaybackResourceGovernor
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -26,6 +27,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -42,6 +44,9 @@ import okio.buffer
 import okio.sink
 
 private val Context.voicesSettingsStore: DataStore<Preferences> by preferencesDataStore(name = "voices_settings")
+
+/** Small enough to keep a download responsive while yielding CPU/network to TTS. */
+private const val DOWNLOAD_THROTTLE_MS = 125L
 
 private object VoiceKeys {
     val INSTALLED_IDS = stringSetPreferencesKey("installed_voice_ids")
@@ -936,6 +941,7 @@ class VoiceManager @Inject constructor(
                             val buf = ByteArray(64 * 1024)
                             var written = 0L
                             while (true) {
+                                awaitPlaybackPriorityForDownload()
                                 val n = gzStream.read(buf)
                                 if (n == -1) break
                                 out.write(buf, 0, n)
@@ -993,6 +999,7 @@ class VoiceManager @Inject constructor(
                     val buf = ByteArray(64 * 1024)
                     var read = 0L
                     while (true) {
+                        awaitPlaybackPriorityForDownload()
                         val n = source.read(buf)
                         if (n == -1) break
                         sink.write(buf, 0, n)
@@ -1008,6 +1015,21 @@ class VoiceManager @Inject constructor(
             }
         }
         commitDownload(partial, target, knownTotalBytes, expectedSha256)
+    }
+
+    /**
+     * Model downloads are background work: never compete with a listener
+     * whose playable TTS buffer is running low. A suspension happens before
+     * the next 64 KiB read, preserving the partial file; throttling adds a
+     * short cooperative yield without changing the download protocol.
+     */
+    private suspend fun awaitPlaybackPriorityForDownload() {
+        val work = PlaybackResourceGovernor.secondaryWorkFlow.first {
+            it != PlaybackResourceGovernor.SecondaryWork.SUSPENDED
+        }
+        if (work == PlaybackResourceGovernor.SecondaryWork.THROTTLED) {
+            delay(DOWNLOAD_THROTTLE_MS)
+        }
     }
 
     private fun File.partialDownloadFile(): File = File(parentFile, "$name.part")
