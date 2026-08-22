@@ -1320,6 +1320,13 @@ private fun VoiceRow(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    voice.performanceHint?.let { hint ->
+                        Text(
+                            text = hint,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.tertiary,
+                        )
+                    }
                     // PR-H (#86) — per-voice cached-bytes label. Only
                     // rendered for voices the user has meaningfully
                     // used (cache attributed to this voice > 0).
@@ -1331,7 +1338,7 @@ private fun VoiceRow(
                     // without competing for the row's attention.
                     if (voice.cachedBytes > 0L) {
                         Text(
-                            text = formatBytes(voice.cachedBytes) + " cached",
+                            text = formatBytes(voice.cachedBytes) + " em cache",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

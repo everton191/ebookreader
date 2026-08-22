@@ -77,7 +77,7 @@ class CacheStateInspector @Inject constructor(
         chunkerVersion: Int,
         pronunciationDictHash: Int = 0,
     ): ChapterCacheState = withContext(Dispatchers.IO) {
-        classify(
+        val exact = classify(
             key = PcmCacheKey(
                 chapterId = chapterId,
                 voiceId = voiceId,
@@ -86,6 +86,12 @@ class CacheStateInspector @Inject constructor(
                 chunkerVersion = chunkerVersion,
                 pronunciationDictHash = pronunciationDictHash,
             ),
+        )
+        if (exact != ChapterCacheState.None) exact else classifyByMetadata(
+            chapterId = chapterId,
+            voiceId = voiceId,
+            chunkerVersion = chunkerVersion,
+            pronunciationDictHash = pronunciationDictHash,
         )
     }
 
@@ -107,7 +113,7 @@ class CacheStateInspector @Inject constructor(
     ): Map<String, ChapterCacheState> = withContext(Dispatchers.IO) {
         if (chapterIds.isEmpty()) return@withContext emptyMap()
         chapterIds.associateWith { chapterId ->
-            classify(
+            val exact = classify(
                 key = PcmCacheKey(
                     chapterId = chapterId,
                     voiceId = voiceId,
@@ -116,6 +122,12 @@ class CacheStateInspector @Inject constructor(
                     chunkerVersion = chunkerVersion,
                     pronunciationDictHash = pronunciationDictHash,
                 ),
+            )
+            if (exact != ChapterCacheState.None) exact else classifyByMetadata(
+                chapterId = chapterId,
+                voiceId = voiceId,
+                chunkerVersion = chunkerVersion,
+                pronunciationDictHash = pronunciationDictHash,
             )
         }
     }
@@ -127,6 +139,39 @@ class CacheStateInspector @Inject constructor(
         cache.isComplete(key) -> ChapterCacheState.Complete
         cache.metaFileFor(key).exists() -> ChapterCacheState.Partial
         else -> ChapterCacheState.None
+    }
+
+    /** Finds enriched Phase-4 keys whose SHA cannot be reconstructed by UI callers. */
+    private fun classifyByMetadata(
+        chapterId: String,
+        voiceId: String,
+        chunkerVersion: Int,
+        pronunciationDictHash: Int,
+    ): ChapterCacheState {
+        val rootDir = cache.rootDirectory()
+        val matches = rootDir.listFiles { file -> file.name.endsWith(META_SUFFIX) }
+            .orEmpty()
+            .mapNotNull { metaFile ->
+                val meta = runCatching {
+                    pcmCacheJson.decodeFromString(PcmMeta.serializer(), metaFile.readText())
+                }.getOrNull() ?: return@mapNotNull null
+                if (
+                    meta.chapterId != chapterId ||
+                    meta.voiceId != voiceId ||
+                    meta.chunkerVersion != chunkerVersion ||
+                    meta.speedHundredths != 100 ||
+                    meta.pitchHundredths != 100 ||
+                    meta.pronunciationDictHash != pronunciationDictHash
+                ) return@mapNotNull null
+                val basename = metaFile.name.removeSuffix(META_SUFFIX)
+                val complete = File(rootDir, "$basename$INDEX_SUFFIX").exists()
+                if (complete) ChapterCacheState.Complete else ChapterCacheState.Partial
+            }
+        return when {
+            ChapterCacheState.Complete in matches -> ChapterCacheState.Complete
+            ChapterCacheState.Partial in matches -> ChapterCacheState.Partial
+            else -> ChapterCacheState.None
+        }
     }
 
     /**
@@ -175,6 +220,7 @@ class CacheStateInspector @Inject constructor(
     private companion object {
         const val META_SUFFIX = ".meta.json"
         const val PCM_SUFFIX = ".pcm"
+        const val INDEX_SUFFIX = ".idx.json"
     }
 }
 

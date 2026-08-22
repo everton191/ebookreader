@@ -22,15 +22,15 @@ object Phase4TtsMetrics {
     private val fallbacks = AtomicLong(0)
 
     fun recordModelLoad(engine: String, voice: String, elapsedMs: Long, reused: Boolean) {
-        Log.i(TAG, "MODEL_LOAD_MS=$elapsedMs engine=$engine voice=$voice reused=$reused")
+        info("MODEL_LOAD_MS=$elapsedMs engine=$engine voice=$voice reused=$reused")
     }
 
     fun recordWarmup(engine: String, voice: String, elapsedMs: Long, success: Boolean) {
-        Log.i(TAG, "TTS_WARMUP_MS=$elapsedMs engine=$engine voice=$voice success=$success")
+        info("TTS_WARMUP_MS=$elapsedMs engine=$engine voice=$voice success=$success")
     }
 
     fun recordPlayToFirstAudio(elapsedMs: Long, engine: String, voice: String) {
-        Log.i(TAG, "PLAY_TO_FIRST_AUDIO_MS=$elapsedMs engine=$engine voice=$voice")
+        info("PLAY_TO_FIRST_AUDIO_MS=$elapsedMs engine=$engine voice=$voice")
     }
 
     fun recordSegment(
@@ -45,8 +45,7 @@ object Phase4TtsMetrics {
         val durationMs = pcmDurationMs(pcmBytes, sampleRate)
         val rtf = realTimeFactor(generationMs, durationMs)
         generated.incrementAndGet()
-        Log.i(
-            TAG,
+        info(
             "SEGMENT_GENERATION_MS=$generationMs SEGMENT_AUDIO_DURATION_MS=$durationMs " +
                 "REAL_TIME_FACTOR=${"%.3f".format(java.util.Locale.US, rtf)} " +
                 "engine=$engine voice=$voice quality=$quality chars=$textLength RAM_MB=${ramMb()}",
@@ -55,11 +54,11 @@ object Phase4TtsMetrics {
 
     fun recordGenerationFailure(engine: String, voice: String) {
         val count = generationFailures.incrementAndGet()
-        Log.w(TAG, "TTS_FAILURE_COUNT=$count engine=$engine voice=$voice")
+        warn("TTS_FAILURE_COUNT=$count engine=$engine voice=$voice")
     }
 
     fun recordReadyAudio(milliseconds: Long) {
-        Log.i(TAG, "READY_AUDIO_SECONDS=${"%.3f".format(java.util.Locale.US, milliseconds / 1000.0)}")
+        info("READY_AUDIO_SECONDS=${"%.3f".format(java.util.Locale.US, milliseconds / 1000.0)}")
     }
 
     fun recordCache(hit: Boolean) {
@@ -68,20 +67,31 @@ object Phase4TtsMetrics {
         val misses = cacheMisses.get()
         val total = hits + misses
         val rate = if (total == 0L) 0.0 else hits.toDouble() / total
-        Log.i(
-            TAG,
+        info(
             "CACHE_HIT_RATE=${"%.3f".format(java.util.Locale.US, rate)} " +
                 "CACHE_HITS=$hits CACHE_MISSES=$misses",
         )
     }
 
+    fun recordRamCache(
+        hit: Boolean,
+        entries: Int,
+        bytes: Long,
+        hitRate: Double,
+    ) {
+        info(
+            "RAM_CACHE_${if (hit) "HIT" else "MISS"}=1 " +
+                "RAM_CACHE_HIT_RATE=${"%.3f".format(java.util.Locale.US, hitRate)} " +
+                "RAM_CACHE_ENTRIES=$entries RAM_CACHE_BYTES=$bytes",
+        )
+    }
+
     fun recordUnderrun() {
-        Log.w(TAG, "QUEUE_UNDERRUN_COUNT=${underruns.incrementAndGet()}")
+        warn("QUEUE_UNDERRUN_COUNT=${underruns.incrementAndGet()}")
     }
 
     fun recordFallback(primary: String, fallback: String) {
-        Log.w(
-            TAG,
+        warn(
             "TTS_PRIMARY_FAILED=$primary TTS_FALLBACK_USED=$fallback " +
                 "FALLBACK_COUNT=${fallbacks.incrementAndGet()}",
         )
@@ -94,5 +104,14 @@ object Phase4TtsMetrics {
         if (audioDurationMs <= 0L) Double.POSITIVE_INFINITY
         else generationMs.toDouble() / audioDurationMs.toDouble()
 
-    private fun ramMb(): Long = Debug.getPss().toLong() / 1024L
+    private fun ramMb(): Long = runCatching { Debug.getPss().toLong() / 1024L }.getOrDefault(0L)
+
+    /** Metrics are observability only and must never stop synthesis. */
+    private fun info(message: String) {
+        runCatching { Log.i(TAG, message) }
+    }
+
+    private fun warn(message: String) {
+        runCatching { Log.w(TAG, message) }
+    }
 }

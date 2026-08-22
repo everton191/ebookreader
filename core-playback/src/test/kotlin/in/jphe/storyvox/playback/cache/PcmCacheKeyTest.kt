@@ -39,6 +39,14 @@ class PcmCacheKeyTest {
             baseline.copy(pitchHundredths = 105),
             baseline.copy(chunkerVersion = baseline.chunkerVersion + 1),
             baseline.copy(pronunciationDictHash = 12345),
+            baseline.copy(bookId = "book-2"),
+            baseline.copy(segmentId = "segment-2"),
+            baseline.copy(textHash = "text-v2"),
+            baseline.copy(engineId = "kokoro"),
+            baseline.copy(modelId = "model-2"),
+            baseline.copy(modelVersion = "sha-v2"),
+            baseline.copy(style = "expressive"),
+            baseline.copy(qualityPreset = "HIGH"),
         )
         for (k in differentEachField) {
             assertNotEquals(
@@ -47,6 +55,12 @@ class PcmCacheKeyTest {
                 k.fileBaseName(),
             )
         }
+    }
+
+    @Test
+    fun `textHash is deterministic and content sensitive`() {
+        assertEquals(PcmCacheKey.textHash("capítulo"), PcmCacheKey.textHash("capítulo"))
+        assertNotEquals(PcmCacheKey.textHash("capítulo"), PcmCacheKey.textHash("capitulo"))
     }
 
     @Test

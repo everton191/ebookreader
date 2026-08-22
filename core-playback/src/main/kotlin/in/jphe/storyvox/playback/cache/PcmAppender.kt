@@ -46,6 +46,7 @@ class PcmAppender internal constructor(
     private val chunkerVersion: Int,
     private val speedHundredths: Int,
     private val pitchHundredths: Int,
+    private val cacheKey: PcmCacheKey,
 ) {
     /** Per-sentence byte offsets accumulated as we write. Index file is
      *  built from this at finalize time. */
@@ -87,6 +88,16 @@ class PcmAppender internal constructor(
                 chunkerVersion = chunkerVersion,
                 speedHundredths = speedHundredths,
                 pitchHundredths = pitchHundredths,
+                bookId = cacheKey.bookId,
+                segmentId = cacheKey.segmentId,
+                textHash = cacheKey.textHash,
+                engineId = cacheKey.engineId,
+                modelId = cacheKey.modelId,
+                modelVersion = cacheKey.modelVersion,
+                style = cacheKey.style,
+                qualityPreset = cacheKey.qualityPreset,
+                pronunciationDictHash = cacheKey.pronunciationDictHash,
+                spokenTextVersion = cacheKey.spokenTextVersion,
             )
             metaFile.writeText(pcmCacheJson.encodeToString(meta))
         }

@@ -40,6 +40,16 @@ data class PcmCacheKey(
     val chunkerVersion: Int,
     val pronunciationDictHash: Int,
     val spokenTextVersion: Int = `in`.jphe.storyvox.playback.tts.SpokenNumberNormalizer.VERSION,
+    val bookId: String = "",
+    /** Chapter-level container whose index contains the individual segment ids. */
+    val segmentId: String = "chapter-index",
+    /** SHA-256 of chapter text; any edit invalidates incompatible audio. */
+    val textHash: String = "",
+    val engineId: String = "",
+    val modelId: String = "",
+    val modelVersion: String = "",
+    val style: String = "default",
+    val qualityPreset: String = "AUTOMATIC",
 ) {
     /**
      * 64-char hex SHA-256 of `toString()`. Used as the on-disk basename
@@ -62,5 +72,11 @@ data class PcmCacheKey(
          *  rounded half-up). The cache key uses Ints to be portable
          *  across float-rounding noise. */
         fun quantize(value: Float): Int = Math.round(value * 100f)
+
+        fun textHash(text: String): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+                .digest(text.toByteArray(Charsets.UTF_8))
+            return digest.joinToString("") { byte -> "%02x".format(byte) }
+        }
     }
 }

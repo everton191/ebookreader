@@ -54,8 +54,10 @@ import `in`.jphe.storyvox.playback.cache.EngineMutex
 import `in`.jphe.storyvox.playback.cache.PcmAppenderLease
 import `in`.jphe.storyvox.playback.cache.PcmCache
 import `in`.jphe.storyvox.playback.cache.PcmCacheKey
+import `in`.jphe.storyvox.playback.cache.TtsRamCache
 import `in`.jphe.storyvox.playback.cache.PcmIndex
 import `in`.jphe.storyvox.playback.cache.PrerenderTriggers
+import `in`.jphe.storyvox.playback.cache.cacheModelVersionFor
 import `in`.jphe.storyvox.playback.cache.pcmCacheJson
 import `in`.jphe.storyvox.playback.lang.LanguageDetector
 import `in`.jphe.storyvox.playback.lang.LanguageVoiceRouter
@@ -559,6 +561,8 @@ class EnginePlayer @AssistedInject constructor(
      *  sentence to a target-language speaker (see [observeLanguageDetectionConfig]
      *  and [routeKokoroSpeaker]). */
     private val languageDetectionConfig: LanguageDetectionConfig,
+    /** Phase 4 — durable per-model capability result from the short warm-up benchmark. */
+    private val voiceBenchmarkStore: TtsVoiceBenchmarkStore,
 ) : SimpleBasePlayer(Looper.getMainLooper()) {
 
     @AssistedFactory
@@ -567,8 +571,11 @@ class EnginePlayer @AssistedInject constructor(
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    /** Bounded LRU shared across chapter-source rebuilds for immediate seek-back. */
+    private val ttsRamCache = TtsRamCache()
 
     private var sentences: List<Sentence> = emptyList()
+    @Volatile private var currentChapterTextHash: String = ""
     /** Issue #1001 — sentence indices that open a paragraph, computed
      *  once per chapter alongside [sentences]. Paragraph navigation
      *  ([seekParagraph]) seeks to one of these sentences' `startChar`, so
@@ -628,6 +635,7 @@ class EnginePlayer @AssistedInject constructor(
     /** Latest DataStore-backed selection, independent from the loaded model. */
     @Volatile private var selectedVoiceId: String? = null
     @Volatile private var loadedVoiceLanguage: String? = null
+    @Volatile private var loadedModelVersion: String = "unknown"
     /** Phase 4 baseline: monotonic timestamp from the user's play request to
      * the first AudioTrack.play() for that request. Reset after one sample. */
     @Volatile private var phase4PlayRequestedAtMs: Long? = null
@@ -1455,6 +1463,9 @@ class EnginePlayer @AssistedInject constructor(
      */
     private val loadAndPlayMutex = Mutex()
 
+    /** Coalesces repeated reader-mount / binder-callback warm-up requests. */
+    private val prewarmInFlight = AtomicBoolean(false)
+
     /**
      * Issue #944 / #956 — serialization guard for [advanceChapter]. Separate
      * from [loadAndPlayMutex] because `advanceChapter` calls `loadAndPlay`
@@ -1894,83 +1905,62 @@ class EnginePlayer @AssistedInject constructor(
     }
 
     /**
-     * Issue #543 — fire-and-forget engine pre-warm. Called from a UI
-     * surface (Library mount, voice-picker open) so the first Listen
-     * tap doesn't hit a 5-10 s sherpa-onnx loadModel.
+     * Phase 4 real pre-warm. Loads the selected model under the same outer
+     * mutex used by [loadAndPlay], so a Play tap racing this request waits for
+     * one load and then takes the existing hot-model fast path.
      *
-     * Best-effort:
-     *  - No-op if a chapter is already playing (pipeline owns the
-     *    engines; we don't want to fight it).
-     *  - No-op if no voice is active yet (the [observeActiveVoice]
-     *    collector will fire on the first DataStore emission anyway).
-     *  - Hops to IO; engineMutex serializes against any
-     *    [loadAndPlay] call that races us.
-     *
-     * Idempotent across repeated calls.
+     * A loaded/paused chapter is deliberately left untouched: tearing down
+     * its producer merely to warm a newly selected voice would discard the
+     * user's buffered position. That voice is loaded by the normal resume
+     * path instead.
      */
     fun prewarmEngine() {
-        if (_observableState.value.isPlaying) return
+        val snapshot = _observableState.value
+        if (snapshot.isPlaying || snapshot.currentChapterId != null) return
+        if (!prewarmInFlight.compareAndSet(false, true)) return
         scope.launch {
             val phase4WarmupStart = android.os.SystemClock.elapsedRealtime()
             var phase4WarmupEngine = "unknown"
             var phase4WarmupVoice = "unknown"
-            runCatching {
+            try {
                 val active = voiceManager.activeVoice.first() ?: return@launch
-                // The active voice flow may emit a "no voice" entry on
-                // a fresh install. Loading would fail anyway; bail.
                 if (active.id.isBlank()) return@launch
                 phase4WarmupEngine = active.engineType.toString()
                 phase4WarmupVoice = active.id
                 android.util.Log.i(
                     "EnginePlayer",
-                    "prewarm: scheduling load for voice=${active.id} engineType=${active.engineType}",
+                    "prewarm: loading voice=${active.id} engineType=${active.engineType}",
                 )
-                // We don't actually call loadModel here — that's the
-                // expensive path and we don't want to fight a future
-                // loadAndPlay. The cheaper warm is to ensure the engine
-                // singleton is constructed (the sherpa-onnx
-                // VoiceEngine.getInstance() does a small native init on
-                // first call) so the first chapter's loadModel doesn't
-                // pay the singleton's construction cost on top of the
-                // model load. Reading sampleRate is the canonical "wake
-                // the singleton" trigger.
-                withContext(Dispatchers.IO) {
-                    when (active.engineType) {
-                        is EngineType.Kokoro ->
-                            runCatching { KokoroEngine.getInstance().sampleRate }
-                        is EngineType.Kitten ->
-                            runCatching { KittenEngine.getInstance().sampleRate }
-                        is EngineType.Supertonic ->
-                            runCatching { SupertonicEngine.getInstance().sampleRate }
-                        is EngineType.Azure -> {
-                            // Azure has no JNI singleton to warm; the
-                            // HTTPS client lazy-inits on first request
-                            // anyway. No-op.
-                        }
-                        is EngineType.SystemTts -> {
-                            // #676 — System TTS has no JNI singleton to
-                            // warm either; the framework TextToSpeech
-                            // construction happens in loadAndPlay's
-                            // load path. No-op here.
-                        }
-                        else ->
-                            runCatching { VoiceEngine.getInstance().sampleRate }
+                val modelLoadStartedAt = android.os.SystemClock.elapsedRealtime()
+                val ready = loadAndPlayMutex.withLock {
+                    val current = _observableState.value
+                    if (current.isPlaying || current.currentChapterId != null) {
+                        false
+                    } else {
+                        ensureVoiceLoaded()
                     }
-                    // Issue #582 — seed the @Volatile sample-rate cache
-                    // off the engine on this IO prewarm pass. Any
-                    // subsequent UI read (speed-chip cycle re-entering
-                    // startPlaybackPipeline mid-loadModel) hits the
-                    // volatile rather than the contended engine lock.
-                    EngineSampleRateCache.refreshFromEngine()
                 }
-            }.onSuccess {
+                // Release loadAndPlayMutex before the five-phrase benchmark.
+                // A Play tap can now take the hot-model path immediately;
+                // engineMutex still prevents native calls from overlapping.
+                if (
+                    ready &&
+                    phase4PlayRequestedAtMs == null &&
+                    _observableState.value.currentChapterId == null
+                ) {
+                    runVoiceBenchmarkIfNeeded(
+                        active = active,
+                        modelLoadMs = android.os.SystemClock.elapsedRealtime() - modelLoadStartedAt,
+                    )
+                }
                 Phase4TtsMetrics.recordWarmup(
                     phase4WarmupEngine,
                     phase4WarmupVoice,
                     android.os.SystemClock.elapsedRealtime() - phase4WarmupStart,
-                    success = true,
+                    success = ready,
                 )
-            }.onFailure { t ->
+            } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) throw t
                 Phase4TtsMetrics.recordWarmup(
                     phase4WarmupEngine,
                     phase4WarmupVoice,
@@ -1978,6 +1968,8 @@ class EnginePlayer @AssistedInject constructor(
                     success = false,
                 )
                 android.util.Log.w("EnginePlayer", "prewarm: best-effort warm failed", t)
+            } finally {
+                prewarmInFlight.set(false)
             }
         }
     }
@@ -2107,6 +2099,7 @@ class EnginePlayer @AssistedInject constructor(
         // brass spinner immediately. Sherpa-onnx Kokoro init can take 30+s
         // on modest hardware; without this the screen sits blank that long.
         val text = chapter.text
+        currentChapterTextHash = PcmCacheKey.textHash(text)
         sentences = chunker.chunk(text, detectLocale(text))
         // Issue #1001 — derive paragraph heads from the freshly-chunked
         // sentence list (option B): nav targets a real sentence startChar.
@@ -2703,6 +2696,7 @@ class EnginePlayer @AssistedInject constructor(
         activeEngineType = active.engineType
         loadedVoiceId = active.id
         loadedVoiceLanguage = active.language
+        loadedModelVersion = cacheModelVersionFor(voiceManager, active)
         voiceReloadPending = false
         // Issue #582 — populate the @Volatile sample-rate cache now that
         // loadModel has returned (the engine's intrinsic monitor is no
@@ -2930,12 +2924,11 @@ class EnginePlayer @AssistedInject constructor(
                 if (cachedAutoLanguageDetection && engineType is EngineType.Kokoro) "$it+autolang" else it
             }
             if (chapId == null || voiceId == null) return@run null
-            val probeKey = PcmCacheKey(
+            val resolvedEngineType = engineType ?: return@run null
+            val probeKey = cacheKeyForCurrentChapter(
                 chapterId = chapId,
                 voiceId = voiceId,
-                speedHundredths = PcmCacheKey.quantize(currentSpeed),
-                pitchHundredths = PcmCacheKey.quantize(currentPitch),
-                chunkerVersion = CHUNKER_VERSION,
+                engineType = resolvedEngineType,
                 pronunciationDictHash = cachedPronunciationDict.contentHash,
             )
             val onDiskRate = kotlinx.coroutines.withContext(Dispatchers.IO) {
@@ -3161,14 +3154,14 @@ class EnginePlayer @AssistedInject constructor(
         val cacheKey: PcmCacheKey? = if (
             chapterIdForCache != null && voiceIdForCache != null
         ) {
-            PcmCacheKey(
-                chapterId = chapterIdForCache,
-                voiceId = voiceIdForCache,
-                speedHundredths = PcmCacheKey.quantize(currentSpeed),
-                pitchHundredths = PcmCacheKey.quantize(currentPitch),
-                chunkerVersion = CHUNKER_VERSION,
-                pronunciationDictHash = pronunciationDict.contentHash,
-            )
+            engineType?.let { resolvedEngineType ->
+                cacheKeyForCurrentChapter(
+                    chapterId = chapterIdForCache,
+                    voiceId = voiceIdForCache,
+                    engineType = resolvedEngineType,
+                    pronunciationDictHash = pronunciationDict.contentHash,
+                )
+            }
         } else null
 
         // PR-E (#86) — cache-hit dispatch. If the cache for this key
@@ -3301,7 +3294,9 @@ class EnginePlayer @AssistedInject constructor(
                 powerSaveMode = powerSaveMonitor.isPowerSaveMode.value,
                 metricsEngineId = engineType.toString(),
                 metricsVoiceId = loadedVoiceId ?: "unknown",
-                metricsQuality = "active-preset",
+                metricsQuality = TtsQualityPreset.AUTOMATIC.name,
+                ramCache = ttsRamCache,
+                ramCacheNamespace = cacheKey?.fileBaseName(),
             )
         }
         pcmSource = source
@@ -5966,9 +5961,25 @@ class EnginePlayer @AssistedInject constructor(
      */
     private suspend fun ensureVoiceLoaded(): Boolean {
         val active = voiceManager.activeVoice.first() ?: return false
-        // Already loaded? Nothing to do — the engine is hot.
-        if (loadedVoiceId == active.id && activeEngineType != null) return true
+        val parallelState = parallelSynthConfig.currentParallelSynthState()
+        // Already loaded with the same execution shape? Nothing to do — the
+        // engine is genuinely hot, not merely constructed.
+        if (
+            loadedVoiceId == active.id &&
+            activeEngineType == active.engineType &&
+            loadedParallelInstances == parallelState.instances &&
+            loadedThreadsPerInstance == parallelState.threadsPerInstance
+        ) {
+            Phase4TtsMetrics.recordModelLoad(
+                engine = active.engineType.toString(),
+                voice = active.id,
+                elapsedMs = 0L,
+                reused = true,
+            )
+            return true
+        }
 
+        val modelLoadStartedAt = android.os.SystemClock.elapsedRealtime()
         val loadResult: String = withContext(Dispatchers.IO) {
             engineMutex.withLock {
                 // Issue #1342 — gate the native loadModel on the voice's model
@@ -5992,7 +6003,12 @@ class EnginePlayer @AssistedInject constructor(
                         val voiceDir = voiceManager.voiceDirFor(active.id)
                         val onnx = File(voiceDir, "model.onnx").absolutePath
                         val tokens = File(voiceDir, "tokens.txt").absolutePath
-                        VoiceEngine.getInstance().loadModel(context, onnx, tokens)
+                        VoiceEngine.getInstance().loadModel(
+                            context,
+                            onnx,
+                            tokens,
+                            parallelState.threadsPerInstance,
+                        )
                             ?: "Error: load returned null"
                     }
                     is EngineType.Kokoro -> {
@@ -6015,7 +6031,13 @@ class EnginePlayer @AssistedInject constructor(
                         KokoroEngine.getInstance().setSilenceScale(
                             KOKORO_SILENCE_SCALE_BASELINE * currentPunctuationPauseMultiplier,
                         )
-                        KokoroEngine.getInstance().loadModel(context, onnx, tokens, voicesBin)
+                        KokoroEngine.getInstance().loadModel(
+                            context,
+                            onnx,
+                            tokens,
+                            voicesBin,
+                            parallelState.threadsPerInstance,
+                        )
                             ?: "Error: load returned null"
                     }
                     is EngineType.Kitten -> {
@@ -6032,7 +6054,13 @@ class EnginePlayer @AssistedInject constructor(
                         KittenEngine.getInstance().setActiveSpeakerId(
                             (active.engineType as EngineType.Kitten).speakerId,
                         )
-                        KittenEngine.getInstance().loadModel(context, onnx, tokens, voicesBin)
+                        KittenEngine.getInstance().loadModel(
+                            context,
+                            onnx,
+                            tokens,
+                            voicesBin,
+                            parallelState.threadsPerInstance,
+                        )
                             ?: "Error: load returned null"
                     }
                     // Issue #1114 — Supertonic recap path. Like Kitten, no
@@ -6044,7 +6072,11 @@ class EnginePlayer @AssistedInject constructor(
                             (active.engineType as EngineType.Supertonic).speakerId,
                         )
                         SupertonicEngine.getInstance()
-                            .loadModel(context, sharedDir.absolutePath)
+                            .loadModel(
+                                context,
+                                sharedDir.absolutePath,
+                                parallelState.threadsPerInstance,
+                            )
                             ?: "Error: load returned null"
                     }
                     is EngineType.Azure -> return@withContext "Error: Azure unsupported in recap"
@@ -6086,12 +6118,136 @@ class EnginePlayer @AssistedInject constructor(
                 }
             }
         }
+        Phase4TtsMetrics.recordModelLoad(
+            engine = active.engineType.toString(),
+            voice = active.id,
+            elapsedMs = android.os.SystemClock.elapsedRealtime() - modelLoadStartedAt,
+            reused = false,
+        )
         if (loadResult != "Success") return false
+        // A Settings voice change can arrive while native loadModel is in
+        // flight. Never publish the superseded model as the active hot voice.
+        if (voiceManager.activeVoice.first()?.id != active.id) return false
         activeEngineType = active.engineType
         loadedVoiceId = active.id
         loadedVoiceLanguage = active.language
+        loadedModelVersion = cacheModelVersionFor(voiceManager, active)
+        // The lightweight prewarm deliberately loads one primary engine only.
+        // Mark the full execution shape reusable only for the serial setting;
+        // a configured N>1 still goes through loadAndPlay to build its N-1
+        // secondary sessions before synthesis starts.
+        loadedParallelInstances = if (parallelState.instances == 1) 1 else 0
+        loadedThreadsPerInstance = parallelState.threadsPerInstance
+        voiceReloadPending = false
+        EngineSampleRateCache.refreshFromEngine()
+        _observableState.update { it.copy(voiceId = active.id, error = null) }
         return true
     }
+
+    /**
+     * Runs once per (voice, installed model version, preset). PCM is generated
+     * and discarded, so the check is silent and never touches AudioTrack.
+     */
+    private suspend fun runVoiceBenchmarkIfNeeded(
+        active: `in`.jphe.storyvox.playback.voice.UiVoiceInfo,
+        modelLoadMs: Long,
+    ) {
+        if (
+            active.engineType is EngineType.Azure ||
+            active.engineType is EngineType.SystemTts
+        ) return
+        val preset = TtsQualityPreset.AUTOMATIC
+        if (voiceBenchmarkStore.get(active.id, loadedModelVersion, preset) != null) return
+
+        val samples = mutableListOf<Double>()
+        var peakRamMb = currentPssMb()
+        var firstGenerationMs = 0L
+        val handle = activeVoiceEngineHandle(active.engineType)
+        for ((index, phrase) in BENCHMARK_PHRASES_PT_BR.withIndex()) {
+            // Playback has priority over diagnostics. Stop between phrases so
+            // a Play tap waits for at most the single native call in flight.
+            if (
+                phase4PlayRequestedAtMs != null ||
+                _observableState.value.currentChapterId != null ||
+                loadedVoiceId != active.id ||
+                activeEngineType != active.engineType
+            ) return
+            val generationStart = android.os.SystemClock.elapsedRealtime()
+            val pcm = withContext(Dispatchers.IO) {
+                engineMutex.withLock {
+                    handle.generateAudioPCM(
+                        SpokenNumberNormalizer.normalize(phrase, "pt-BR"),
+                        speed = 1.0f,
+                        pitch = 1.0f,
+                    )
+                }
+            } ?: continue
+            val generationMs = android.os.SystemClock.elapsedRealtime() - generationStart
+            if (index == 0) firstGenerationMs = generationMs
+            val audioMs = Phase4TtsMetrics.pcmDurationMs(pcm.size, handle.sampleRate)
+            samples += Phase4TtsMetrics.realTimeFactor(generationMs, audioMs)
+            peakRamMb = maxOf(peakRamMb, currentPssMb())
+        }
+        val summary = TtsBenchmarkCalculator.summarizeRtf(samples) ?: return
+        if (samples.size < TtsVoiceBenchmark.MIN_SAMPLES) {
+            android.util.Log.w(
+                "EnginePlayer",
+                "TTS benchmark incomplete voice=${active.id} samples=${samples.size}; will retry",
+            )
+            return
+        }
+        val benchmark = TtsVoiceBenchmark(
+            engineId = active.engineType.toEngineKey().engineId,
+            modelId = loadedModelVersion,
+            voiceId = active.id,
+            qualityPreset = preset,
+            modelLoadMs = modelLoadMs,
+            warmupMs = firstGenerationMs,
+            peakRamMb = peakRamMb,
+            medianRtf = summary.first,
+            p95Rtf = summary.second,
+            sampleCount = samples.size,
+            measuredAtEpochMs = System.currentTimeMillis(),
+        )
+        voiceBenchmarkStore.save(benchmark)
+        android.util.Log.i(
+            "Phase4Tts",
+            "VOICE_BENCHMARK voice=${active.id} model=$loadedModelVersion " +
+                "medianRtf=${benchmark.medianRtf} p95Rtf=${benchmark.p95Rtf} " +
+                "RAM_MB=${benchmark.peakRamMb} capability=${benchmark.capability}",
+        )
+    }
+
+    private fun currentPssMb(): Long = runCatching {
+        android.os.Debug.getPss().toLong() / 1024L
+    }.getOrDefault(0L)
+
+    private fun cacheKeyForCurrentChapter(
+        chapterId: String,
+        voiceId: String,
+        engineType: EngineType,
+        pronunciationDictHash: Int,
+    ): PcmCacheKey = PcmCacheKey(
+        bookId = _observableState.value.currentFictionId.orEmpty(),
+        chapterId = chapterId,
+        segmentId = "chapter-index-v$CHUNKER_VERSION",
+        textHash = currentChapterTextHash,
+        engineId = engineType.toEngineKey().engineId,
+        modelId = loadedVoiceId.orEmpty(),
+        modelVersion = loadedModelVersion,
+        voiceId = voiceId,
+        speedHundredths = PcmCacheKey.quantize(currentSpeed),
+        pitchHundredths = PcmCacheKey.quantize(currentPitch),
+        style = buildString {
+            append(if (cachedVoiceSteady) "steady" else "expressive")
+            append("|pause=").append(currentPunctuationPauseMultiplier)
+            append("|a11y=").append(cachedA11yExtraSilenceMs)
+            append("|autolang=").append(cachedAutoLanguageDetection)
+        },
+        qualityPreset = TtsQualityPreset.AUTOMATIC.name,
+        chunkerVersion = CHUNKER_VERSION,
+        pronunciationDictHash = pronunciationDictHash,
+    )
 
     /**
      * Issue #189 — recap-only producer/consumer pair. Lifted shape from
@@ -6252,6 +6408,14 @@ class EnginePlayer @AssistedInject constructor(
     }
 
     private companion object {
+        val BENCHMARK_PHRASES_PT_BR = listOf(
+            "A manhã chegou tranquila.",
+            "Hoje é vinte e um de agosto.",
+            "Ela abriu o livro e respirou devagar.",
+            "O número cento e vinte e três precisa soar natural.",
+            "Depois da pausa, a história continuou.",
+        )
+
         /** Fallback when the engine reports a non-positive sample rate (model
          *  not loaded yet). Piper voices are 22050Hz; Kokoro is 24000Hz. */
         const val DEFAULT_SAMPLE_RATE = 22050

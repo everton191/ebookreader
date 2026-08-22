@@ -23,14 +23,23 @@ Não houve troca de engine nem aumento de workers.
 Também foram criados, no núcleo de reprodução:
 
 - perfis conservadores `AUTOMATIC`, `ECONOMY`, `BALANCED` e `HIGH`;
-- cálculo de benchmark por voz (mediana, p95 e classificação conservadora);
+- benchmark silencioso de cinco frases PT-BR por voz/modelo/preset, persistido
+  com mediana, p95, RAM e classificação conservadora;
+- indicação na biblioteca quando uma voz apresenta risco de tempo real ou é
+  mais adequada para audiobook preparado;
+- preparação antecipada real da voz ao abrir o leitor, sem iniciar áudio;
+- fila observável `WAITING/GENERATING/READY/PLAYING/PLAYED/FAILED`;
+- alvo de prefetch 20–35 s, reservas concorrentes e máximo rígido de 45 s;
+- cache RAM LRU de 16 MiB para seek/rebuild, além do cache LRU em disco;
+- chave de cache com texto, engine, modelo/versão, estilo e preset;
 - política limitada de retry/fallback, sem loop infinito;
 - validação de tamanho e SHA-256 antes da instalação atômica de Piper;
 - fallback apenas para outra voz local no mesmo idioma ou TTS do sistema
   comprovadamente offline.
 
-Os perfis e o benchmark ainda não estão conectados às preferências/UI. A
-política de retry/fallback, por outro lado, já está conectada à carga do motor:
+O preset efetivo permanece `Automática` por padrão; os detalhes internos não são
+expostos na interface enxuta. O benchmark já alimenta a indicação de capacidade
+na biblioteca de vozes. A política de retry/fallback está conectada à carga do motor:
 cada voz tem até duas tentativas limitadas por tempo, seguida no máximo por uma
 alternativa local no mesmo idioma. A escolha persistida do usuário não é
 alterada pelo fallback.
@@ -100,3 +109,18 @@ gate offline.
 
 Essas evidências aprovam código, artefato, instalação e integridade. Elas não
 substituem a audição humana nem os cenários longos ainda listados no gate.
+
+## Fechamento local adicional
+
+- compilação `core-playback`, `feature` e `app`: PASS;
+- testes de fila, prefetch, governor, chave/cache, benchmark e `VoiceManager`:
+  PASS;
+- teste de seek/rebuild em RAM: segundo pipeline reutilizou o PCM e o motor foi
+  chamado uma única vez;
+- APK debug novo: 226.553.012 bytes, SHA-256
+  `25EF70EE93EF658AA04F11EFA4094F69615A27F993604FB95379298AD52C0268`.
+
+O gate permanece **AINDA NÃO PASS**: este fechamento local não substitui o teste
+de pelo menos uma hora/vários capítulos, tela apagada, capítulo seguinte,
+fallback real, RAM longa, underrun longo e posição persistida no Zenfone 8. A
+Fase 5 continua bloqueada.

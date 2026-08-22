@@ -35,6 +35,14 @@ class PcmAppenderTest {
         chunkerVersion = 1,
         speedHundredths = 100,
         pitchHundredths = 100,
+        cacheKey = PcmCacheKey(
+            chapterId = "skypride/ch1",
+            voiceId = "cori",
+            speedHundredths = 100,
+            pitchHundredths = 100,
+            chunkerVersion = 1,
+            pronunciationDictHash = 0,
+        ),
     )
 
     @Test

@@ -1,6 +1,9 @@
 package `in`.jphe.storyvox.playback.tts
 
+import kotlinx.serialization.Serializable
+
 /** Product-level quality choices; engine details stay under the hood. */
+@Serializable
 enum class TtsQualityPreset(
     val workerCount: Int,
     val threadsPerWorker: Int,
@@ -44,12 +47,14 @@ enum class TtsQualityPreset(
 }
 
 /** Measured ability of one installed voice/model on this device. */
+@Serializable
 enum class TtsRealtimeCapability {
     REALTIME_OK,
     REALTIME_RISK,
     OFFLINE_RENDER_ONLY,
 }
 
+@Serializable
 data class TtsVoiceBenchmark(
     val engineId: String,
     val modelId: String,
@@ -63,6 +68,7 @@ data class TtsVoiceBenchmark(
     val sampleCount: Int,
     val measuredAtEpochMs: Long,
 ) {
+    @kotlinx.serialization.Transient
     val capability: TtsRealtimeCapability = classifyCapability(p95Rtf, sampleCount)
 
     companion object {

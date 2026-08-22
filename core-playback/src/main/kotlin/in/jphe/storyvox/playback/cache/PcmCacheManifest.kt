@@ -58,6 +58,16 @@ data class PcmMeta(
     val chunkerVersion: Int,
     val speedHundredths: Int,
     val pitchHundredths: Int,
+    val bookId: String = "",
+    val segmentId: String = "chapter-index",
+    val textHash: String = "",
+    val engineId: String = "",
+    val modelId: String = "",
+    val modelVersion: String = "",
+    val style: String = "default",
+    val qualityPreset: String = "AUTOMATIC",
+    val pronunciationDictHash: Int = 0,
+    val spokenTextVersion: Int = 0,
 )
 
 /** Shared JSON instance. `ignoreUnknownKeys` keeps PR-D/E/F additions

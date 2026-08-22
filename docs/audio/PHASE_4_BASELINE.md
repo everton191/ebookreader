@@ -35,9 +35,13 @@ A tag `Phase4Tts` registra:
 - engine, voz, preset e tamanho do segmento;
 - `READY_AUDIO_SECONDS`;
 - `CACHE_HIT_RATE`, hits e misses;
+- `RAM_CACHE_HIT_RATE`, entries e bytes;
 - `RAM_MB` por amostra de síntese;
 - contadores preparados para underrun, falha e fallback;
 - pontos para `TTS_WARMUP_MS` e `PLAY_TO_FIRST_AUDIO_MS`.
+
+As chamadas de métrica são best effort: falha de `Log` ou leitura de PSS não
+pode encerrar o produtor de áudio.
 
 O RTF é calculado como `generationMs / audioDurationMs`, com PCM mono de 16
 bits e sample rate efetivo da engine.

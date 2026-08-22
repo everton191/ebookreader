@@ -40,6 +40,8 @@ data class UiVoiceInfo(
      *  — only the VoiceLibraryViewModel layer threads the real value
      *  in via [CacheStateInspector.bytesUsedByEveryVoice]. */
     val cachedBytes: Long = 0L,
+    /** Device-measured warning; null when realtime narration is healthy or unmeasured. */
+    val performanceHint: String? = null,
 )
 
 /**

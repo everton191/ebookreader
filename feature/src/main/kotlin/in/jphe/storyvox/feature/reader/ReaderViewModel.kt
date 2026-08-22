@@ -943,6 +943,9 @@ class ReaderViewModel @Inject constructor(
 
     fun setActivePane(pane: ReaderView) { _activePane.value = pane }
 
+    /** Starts the best-effort persistent TTS warm-up when the reader mounts. */
+    fun prewarmEngine() = playback.prewarmEngine()
+
     fun playPause() {
         val state = uiState.value.playback ?: return
         if (state.isPlaying) playback.pause() else playback.play()

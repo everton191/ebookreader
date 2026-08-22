@@ -123,6 +123,7 @@ class PcmCache(
         chunkerVersion = key.chunkerVersion,
         speedHundredths = key.speedHundredths,
         pitchHundredths = key.pitchHundredths,
+        cacheKey = key,
     )
 
     /**

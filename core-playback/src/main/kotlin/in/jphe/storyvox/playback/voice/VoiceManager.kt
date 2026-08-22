@@ -105,7 +105,20 @@ class VoiceManager @Inject constructor(
      * completes (~150–500 ms on a stock Samsung tablet).
      */
     private val systemTtsVoiceProvider: SystemTtsVoiceProvider,
+    private val benchmarkStore: `in`.jphe.storyvox.playback.tts.TtsVoiceBenchmarkStore,
 ) {
+
+    @VisibleForTesting
+    internal constructor(
+        context: Context,
+        azureVoiceProvider: AzureVoiceProvider,
+        systemTtsVoiceProvider: SystemTtsVoiceProvider,
+    ) : this(
+        context,
+        azureVoiceProvider,
+        systemTtsVoiceProvider,
+        `in`.jphe.storyvox.playback.tts.TtsVoiceBenchmarkStore(context),
+    )
 
     private val store: DataStore<Preferences> = context.voicesSettingsStore
     @VisibleForTesting internal var http: OkHttpClient = OkHttpClient.Builder().build()
@@ -1055,5 +1068,14 @@ class VoiceManager @Inject constructor(
         qualityLevel = qualityLevel,
         engineType = engineType,
         gender = gender,
+        performanceHint = benchmarkStore.latestForVoice(id)?.let { benchmark ->
+            when (benchmark.capability) {
+                `in`.jphe.storyvox.playback.tts.TtsRealtimeCapability.REALTIME_OK -> null
+                `in`.jphe.storyvox.playback.tts.TtsRealtimeCapability.REALTIME_RISK ->
+                    "Pode precisar preparar o áudio"
+                `in`.jphe.storyvox.playback.tts.TtsRealtimeCapability.OFFLINE_RENDER_ONLY ->
+                    "Melhor para audiobook preparado"
+            }
+        },
     )
 }

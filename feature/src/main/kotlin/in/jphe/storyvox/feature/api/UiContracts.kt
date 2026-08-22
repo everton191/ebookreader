@@ -616,6 +616,11 @@ interface PlaybackControllerUi {
         get() = kotlinx.coroutines.flow.emptyFlow()
     fun play()
     fun pause()
+    /**
+     * Prepare the selected TTS engine before the first Play tap. The default
+     * keeps lightweight previews and test fakes source-compatible.
+     */
+    fun prewarmEngine() = Unit
     fun seekTo(ms: Long)
     /** Seek by char offset into chapter text (used by tap-on-sentence). */
     fun seekToChar(charOffset: Int)

@@ -1,16 +1,20 @@
 package `in`.jphe.storyvox.playback.tts.source
 
 import android.os.Process as AndroidProcess
+import `in`.jphe.storyvox.playback.SPEED_BASELINE_CHARS_PER_SECOND
 import `in`.jphe.storyvox.playback.SentenceRange
 import `in`.jphe.storyvox.playback.PlaybackResourceGovernor
 import `in`.jphe.storyvox.playback.cache.PcmAppender
 import `in`.jphe.storyvox.playback.cache.PcmAppenderLease
+import `in`.jphe.storyvox.playback.cache.TtsRamCache
 import `in`.jphe.storyvox.playback.tts.Sentence
 import `in`.jphe.storyvox.playback.tts.Phase4TtsMetrics
 import `in`.jphe.storyvox.playback.tts.AdaptivePrefetchController
+import `in`.jphe.storyvox.playback.tts.TtsQualityPreset
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -168,6 +172,8 @@ class EngineStreamingSource(
     private val metricsVoiceId: String = "unknown",
     private val metricsQuality: String = "unknown",
     private val prefetchController: AdaptivePrefetchController = AdaptivePrefetchController(),
+    private val ramCache: TtsRamCache? = null,
+    private val ramCacheNamespace: String? = null,
 ) : PcmSource {
 
     /** SAM-style handle so tests can fake the engine without pulling the
@@ -244,6 +250,12 @@ class EngineStreamingSource(
     )
     private val running = AtomicBoolean(true)
     private val queue = LinkedBlockingQueue<Item>(queueCapacity)
+    private val segmentLedger = TtsSegmentQueueLedger(sentences.size, startSentenceIndex)
+
+    /** Explicit WAITING → GENERATING → READY → PLAYING → PLAYED/FAILED state. */
+    val segmentQueueSnapshot: StateFlow<TtsSegmentQueueSnapshot> = segmentLedger.snapshot
+
+    internal fun segmentStateForTest(index: Int): TtsSegmentState? = segmentLedger.stateOf(index)
 
     /**
      * #906 — the chunk most recently handed to the consumer by [nextChunk]
@@ -282,6 +294,13 @@ class EngineStreamingSource(
     @Volatile private var cacheAppender: PcmAppenderLease? = cacheLease
 
     private val _bufferHeadroomMs = MutableStateFlow(0L)
+    private val prefetchReservationLock = Any()
+    private var reservedHeadroomMs = 0L
+    private val prefetchCapacityVersion = MutableStateFlow(0L)
+    private val runtimeGenerationMs = AtomicLong(0L)
+    private val runtimeAudioMs = AtomicLong(0L)
+    private val runtimeSamples = AtomicLong(0L)
+    @Volatile private var latestProcessRamMb: Long? = null
 
     private val _cacheTeeErrors = MutableStateFlow(0)
 
@@ -343,6 +362,7 @@ class EngineStreamingSource(
         // #906 — record this chunk as in-flight so [close] can settle its
         // headroom if the consumer aborts before the matching decrement.
         synchronized(headroomLock) { inFlightChunk = item.chunk }
+        segmentLedger.transition(item.chunk.sentenceIndex, TtsSegmentState.PLAYING)
         item.chunk
     }
 
@@ -377,7 +397,9 @@ class EngineStreamingSource(
             val durMs = pcmDurationMs(chunk.pcm.size) +
                 pcmDurationMs(chunk.trailingSilenceBytes)
             _bufferHeadroomMs.update { (it - durMs).coerceAtLeast(0L) }
+            signalPrefetchCapacityChanged()
             updateResourcePressure()
+            segmentLedger.transition(chunk.sentenceIndex, TtsSegmentState.PLAYED)
         }
     }
 
@@ -385,7 +407,9 @@ class EngineStreamingSource(
         val target = sentences.indexOfLast { it.startChar <= charOffset }
             .takeIf { it >= 0 } ?: 0
         producerJob.cancel()
+        clearPrefetchReservations()
         queue.clear()
+        segmentLedger.resetFrom(target)
         // PR-D (#86) — abandon the in-progress cache. A sparse cache
         // (sentences 0-3 then 12+ because the user seeked forward) is
         // worse than no cache; PR-E's CacheFileSource expects sequential
@@ -409,6 +433,8 @@ class EngineStreamingSource(
         // first clears inFlightChunk and the other no-ops.
         inFlightChunk?.let { decrementHeadroomForChunk(it) }
         producerJob.cancel()
+        clearPrefetchReservations()
+        segmentLedger.failUnfinished()
         queue.clear()
         // Wake any consumer blocked in take() so nextChunk returns null.
         queue.offer(END_PILL)
@@ -518,15 +544,109 @@ class EngineStreamingSource(
             else -> startSerialProducer(fromIndex)
         }
 
-    /** Back-pressure by audio time rather than sentence count. */
-    private suspend fun awaitPrefetchCapacity() {
-        updateResourcePressure()
-        if (!prefetchController.shouldGenerate(_bufferHeadroomMs.value)) {
-            _bufferHeadroomMs.first {
-                !running.get() || prefetchController.shouldGenerate(it)
+    /** Conservative pre-generation audio estimate used for reservations. */
+    private fun estimateSegmentAudioMs(text: String): Long {
+        val speechMs = (
+            text.length.toDouble() /
+                SPEED_BASELINE_CHARS_PER_SECOND.toDouble() /
+                speed.coerceAtLeast(0.5f).toDouble() *
+                1_000.0
+            ).toLong()
+        return (speechMs + 750L).coerceIn(750L, prefetchController.maxMs)
+    }
+
+    /**
+     * Back-pressure by audio time, including work already generating on other
+     * workers. Returns the reservation that must be committed or released.
+     */
+    private suspend fun awaitPrefetchCapacity(estimatedSegmentMs: Long): Long {
+        while (running.get()) {
+            updateResourcePressure()
+            val granted = synchronized(prefetchReservationLock) {
+                if (
+                    prefetchController.canReserve(
+                        readyAudioMs = _bufferHeadroomMs.value,
+                        reservedAudioMs = reservedHeadroomMs,
+                        estimatedSegmentMs = estimatedSegmentMs,
+                        signals = prefetchRuntimeSignals(),
+                    )
+                ) {
+                    reservedHeadroomMs += estimatedSegmentMs
+                    estimatedSegmentMs
+                } else {
+                    0L
+                }
+            }
+            if (granted > 0L) return granted
+
+            val observedVersion = prefetchCapacityVersion.value
+            prefetchCapacityVersion.first {
+                !running.get() || it != observedVersion
             }
         }
+        return 0L
     }
+
+    private fun commitPrefetchReservation(reservedMs: Long, actualMs: Long) {
+        synchronized(prefetchReservationLock) {
+            reservedHeadroomMs = (reservedHeadroomMs - reservedMs).coerceAtLeast(0L)
+            _bufferHeadroomMs.update { it + actualMs.coerceAtLeast(0L) }
+            prefetchCapacityVersion.update { it + 1L }
+        }
+    }
+
+    private fun releasePrefetchReservation(reservedMs: Long) {
+        if (reservedMs <= 0L) return
+        synchronized(prefetchReservationLock) {
+            reservedHeadroomMs = (reservedHeadroomMs - reservedMs).coerceAtLeast(0L)
+            prefetchCapacityVersion.update { it + 1L }
+        }
+    }
+
+    private fun clearPrefetchReservations() {
+        synchronized(prefetchReservationLock) {
+            reservedHeadroomMs = 0L
+            prefetchCapacityVersion.update { it + 1L }
+        }
+    }
+
+    private fun signalPrefetchCapacityChanged() {
+        prefetchCapacityVersion.update { it + 1L }
+    }
+
+    private fun recordPrefetchRuntimeSample(
+        generationMs: Long,
+        pcmBytes: Int,
+        sourceSampleRate: Int,
+    ) {
+        runtimeGenerationMs.addAndGet(generationMs.coerceAtLeast(0L))
+        runtimeAudioMs.addAndGet(pcmDurationMsForRate(pcmBytes, sourceSampleRate))
+        runtimeSamples.incrementAndGet()
+        // Debug.getPss is unavailable in pure JVM tests and can fail on some
+        // vendor builds. RAM is an adaptive hint, never a synthesis gate.
+        latestProcessRamMb = runCatching {
+            android.os.Debug.getPss().toLong() / 1024L
+        }.getOrNull()
+    }
+
+    private fun prefetchRuntimeSignals(): AdaptivePrefetchController.RuntimeSignals {
+        val samples = runtimeSamples.get()
+        val generatedMs = runtimeGenerationMs.get()
+        val audioMs = runtimeAudioMs.get()
+        return AdaptivePrefetchController.RuntimeSignals(
+            rtf = if (samples > 0L && audioMs > 0L) generatedMs.toDouble() / audioMs else null,
+            averageSegmentMs = if (samples > 0L) audioMs / samples else null,
+            processRamMb = latestProcessRamMb,
+            queueDepth = queue.size,
+            engineId = metricsEngineId,
+            qualityPreset = runCatching { TtsQualityPreset.valueOf(metricsQuality) }
+                .getOrDefault(TtsQualityPreset.AUTOMATIC),
+        )
+    }
+
+    private fun pcmDurationMsForRate(bytes: Int, sourceSampleRate: Int): Long =
+        if (sourceSampleRate <= 0) 0L
+        else bytes.toLong() * 1_000L / (sourceSampleRate.toLong() * 2L)
 
     private fun updateResourcePressure() {
         PlaybackResourceGovernor.onReadyAudioChanged(
@@ -553,7 +673,7 @@ class EngineStreamingSource(
         val jobChan = kotlinx.coroutines.channels.Channel<Int>(
             kotlinx.coroutines.channels.Channel.UNLIMITED,
         )
-        val completed = java.util.concurrent.ConcurrentHashMap<Int, PcmChunk>()
+        val completed = java.util.concurrent.ConcurrentHashMap<Int, GeneratedChunk>()
         val signal = MutableStateFlow(0L)
 
         // Feeder: walks sentence indices into the worker channel.
@@ -607,12 +727,19 @@ class EngineStreamingSource(
                     signal.first { completed.containsKey(next) }
                 }
                 if (!running.get()) break
-                val chunk = completed.remove(next) ?: continue
-                runInterruptible { queue.put(Item(chunk)) }
-                _bufferHeadroomMs.update {
-                    it + pcmDurationMs(chunk.pcm.size) +
-                        pcmDurationMs(chunk.trailingSilenceBytes)
+                val generated = completed.remove(next) ?: continue
+                val chunk = generated.chunk
+                if (chunk == null) {
+                    next++
+                    continue
                 }
+                runInterruptible { queue.put(Item(chunk)) }
+                segmentLedger.transition(next, TtsSegmentState.READY)
+                commitPrefetchReservation(
+                    reservedMs = generated.reservedMs,
+                    actualMs = pcmDurationMs(chunk.pcm.size) +
+                        pcmDurationMs(chunk.trailingSilenceBytes),
+                )
                 Phase4TtsMetrics.recordReadyAudio(_bufferHeadroomMs.value)
                 updateResourcePressure()
                 // PR-D (#86) — tee write FROM THE SEQUENCER. Workers in
@@ -681,10 +808,10 @@ class EngineStreamingSource(
     private suspend fun runParallelWorker(
         workerEngine: VoiceEngineHandle,
         jobChan: kotlinx.coroutines.channels.ReceiveChannel<Int>,
-        completed: java.util.concurrent.ConcurrentHashMap<Int, PcmChunk>,
+        completed: java.util.concurrent.ConcurrentHashMap<Int, GeneratedChunk>,
         signal: MutableStateFlow<Long>,
         useEngineMutex: Boolean,
-    ) {
+        ) {
         // Bump priority on the worker's OS thread. The fixed-thread
         // pool guarantees this thread is dedicated; calls into the
         // engine don't suspend (they're synchronized JNI calls), so
@@ -696,11 +823,24 @@ class EngineStreamingSource(
         runCatching {
             AndroidProcess.setThreadPriority(producerThreadPriority)
         }
+        var activeIndex: Int? = null
+        var activeReservationMs = 0L
         try {
             for (i in jobChan) {
                 if (!running.get()) break
-                awaitPrefetchCapacity()
                 val s = sentences[i]
+                activeReservationMs = awaitPrefetchCapacity(estimateSegmentAudioMs(s.text))
+                if (activeReservationMs <= 0L) break
+                activeIndex = i
+                segmentLedger.transition(i, TtsSegmentState.GENERATING)
+                ramChunkFor(i)?.let { cached ->
+                    completed[i] = GeneratedChunk(cached, activeReservationMs)
+                    segmentLedger.transition(i, TtsSegmentState.READY)
+                    activeReservationMs = 0L
+                    activeIndex = null
+                    signal.update { it + 1L }
+                    continue
+                }
                 val spokenText = speechTextNormalize(pronunciationDictApply(s.text))
                 val generationStart = System.nanoTime()
                 val pcm = if (useEngineMutex) {
@@ -714,11 +854,22 @@ class EngineStreamingSource(
                 val generationMs = (System.nanoTime() - generationStart) / 1_000_000L
                 if (pcm == null) {
                     Phase4TtsMetrics.recordGenerationFailure(metricsEngineId, metricsVoiceId)
+                    segmentLedger.transition(i, TtsSegmentState.FAILED)
+                    releasePrefetchReservation(activeReservationMs)
+                    activeReservationMs = 0L
+                    completed[i] = GeneratedChunk(chunk = null, reservedMs = 0L)
+                    signal.update { it + 1L }
+                    activeIndex = null
                     continue
                 }
                 Phase4TtsMetrics.recordSegment(
                     metricsEngineId, metricsVoiceId, metricsQuality, spokenText.length,
                     generationMs, pcm.size, workerEngine.sampleRate,
+                )
+                recordPrefetchRuntimeSample(
+                    generationMs = generationMs,
+                    pcmBytes = pcm.size,
+                    sourceSampleRate = workerEngine.sampleRate,
                 )
                 if (!running.get()) break
                 val mult = punctuationPauseMultiplier.coerceAtLeast(0f)
@@ -728,16 +879,30 @@ class EngineStreamingSource(
                 // is 0 and the result equals the v0.5.42 math).
                 val a11yPadMs = extraA11ySilenceMs.toFloat() / speed.coerceAtLeast(0.5f)
                 val silenceBytes = silenceBytesFor((basePauseMs + a11yPadMs).toInt(), sampleRate)
-                completed[i] = PcmChunk(
-                    sentenceIndex = i,
-                    range = SentenceRange(s.index, s.startChar, s.endChar),
-                    pcm = pcm,
-                    trailingSilenceBytes = silenceBytes,
+                val chunk = PcmChunk(
+                        sentenceIndex = i,
+                        range = SentenceRange(s.index, s.startChar, s.endChar),
+                        pcm = pcm,
+                        trailingSilenceBytes = silenceBytes,
+                    )
+                retainRamChunk(i, chunk)
+                completed[i] = GeneratedChunk(
+                    chunk = chunk,
+                    reservedMs = activeReservationMs,
                 )
+                segmentLedger.transition(i, TtsSegmentState.READY)
+                activeReservationMs = 0L
+                activeIndex = null
                 signal.update { it + 1 }
             }
         } catch (_: Throwable) {
-            // Cancelled — silent.
+            activeIndex?.let { failedIndex ->
+                segmentLedger.transition(failedIndex, TtsSegmentState.FAILED)
+                completed[failedIndex] = GeneratedChunk(chunk = null, reservedMs = 0L)
+                signal.update { it + 1L }
+            }
+        } finally {
+            releasePrefetchReservation(activeReservationMs)
         }
     }
 
@@ -754,11 +919,23 @@ class EngineStreamingSource(
         runCatching {
             AndroidProcess.setThreadPriority(producerThreadPriority)
         }
+        var activeIndex: Int? = null
+        var activeReservationMs = 0L
         try {
             for (i in fromIndex until sentences.size) {
                 if (!running.get()) return@launch
-                awaitPrefetchCapacity()
                 val s = sentences[i]
+                activeReservationMs = awaitPrefetchCapacity(estimateSegmentAudioMs(s.text))
+                if (activeReservationMs <= 0L) return@launch
+                activeIndex = i
+                segmentLedger.transition(i, TtsSegmentState.GENERATING)
+                val cachedChunk = ramChunkFor(i)
+                if (cachedChunk != null) {
+                    enqueueSerialChunk(s, cachedChunk, activeReservationMs)
+                    activeReservationMs = 0L
+                    activeIndex = null
+                    continue
+                }
                 // Issue #135: substitute *only* the text fed to the
                 // engine. `s.text` and the highlight char-range stay
                 // unchanged — the user sees the original sentence in
@@ -773,11 +950,20 @@ class EngineStreamingSource(
                 val generationMs = (System.nanoTime() - generationStart) / 1_000_000L
                 if (pcm == null) {
                     Phase4TtsMetrics.recordGenerationFailure(metricsEngineId, metricsVoiceId)
+                    segmentLedger.transition(i, TtsSegmentState.FAILED)
+                    releasePrefetchReservation(activeReservationMs)
+                    activeReservationMs = 0L
+                    activeIndex = null
                     continue
                 }
                 Phase4TtsMetrics.recordSegment(
                     metricsEngineId, metricsVoiceId, metricsQuality, spokenText.length,
                     generationMs, pcm.size, engine.sampleRate,
+                )
+                recordPrefetchRuntimeSample(
+                    generationMs = generationMs,
+                    pcmBytes = pcm.size,
+                    sourceSampleRate = engine.sampleRate,
                 )
                 if (!running.get()) return@launch
                 // Issue #90: the user-facing punctuation-pause selector
@@ -805,33 +991,10 @@ class EngineStreamingSource(
                     pcm = pcm,
                     trailingSilenceBytes = silenceBytes,
                 )
-                runInterruptible { queue.put(Item(chunk)) }
-                _bufferHeadroomMs.update {
-                    it + pcmDurationMs(pcm.size) + pcmDurationMs(silenceBytes)
-                }
-                Phase4TtsMetrics.recordReadyAudio(_bufferHeadroomMs.value)
-                updateResourcePressure()
-                // PR-D (#86) — tee write. Mirror every generated
-                // sentence into the on-disk cache. Synchronous, on the
-                // producer's dedicated thread. The appender's
-                // FileOutputStream.write+flush is microseconds compared
-                // to the generateAudioPCM call (Piper-high synthesis is
-                // the slow path; disk I/O on internal flash is
-                // >100 MB/s). Wrapped in runCatching because a transient
-                // I/O failure (storage full, parent dir wiped) shouldn't
-                // take down the playback pipeline — the listener still
-                // hears the sentence; the cache simply won't complete
-                // this run.
-                //
-                // `totalPauseMs` is the same value passed to
-                // silenceBytesFor — recorded here so PR-E's
-                // CacheFileSource can replay the cadence without
-                // recomputing trailingPauseMs.
-                if (!running.get()) return@launch
-                cacheAppender?.let { ap ->
-                    runCatching { ap.appendSentence(s, pcm, totalPauseMs) }
-                        .onFailure { _cacheTeeErrors.update { it + 1 } }
-                }
+                retainRamChunk(i, chunk)
+                enqueueSerialChunk(s, chunk, activeReservationMs)
+                activeReservationMs = 0L
+                activeIndex = null
             }
             // #573 — Gapless: stamp the authoritative "producer walked
             // every sentence" flag BEFORE pushing END_PILL. The consumer
@@ -849,6 +1012,7 @@ class EngineStreamingSource(
             // next nextChunk() returns null.
             runInterruptible { queue.put(END_PILL) }
         } catch (t: Throwable) {
+            activeIndex?.let { segmentLedger.transition(it, TtsSegmentState.FAILED) }
             // Issue #588 — pre-fix this was a silent swallow ("Cancelled
             // (close, seek, voice swap) — silent"). The silent path
             // masked any non-cancellation failure: if generateAudioPCM
@@ -901,12 +1065,74 @@ class EngineStreamingSource(
                     runInterruptible { queue.put(END_PILL) }
                 }
             }
+        } finally {
+            releasePrefetchReservation(activeReservationMs)
         }
+    }
+
+    private suspend fun enqueueSerialChunk(
+        sentence: Sentence,
+        chunk: PcmChunk,
+        reservedMs: Long,
+    ) {
+        runInterruptible { queue.put(Item(chunk)) }
+        segmentLedger.transition(chunk.sentenceIndex, TtsSegmentState.READY)
+        commitPrefetchReservation(
+            reservedMs = reservedMs,
+            actualMs = pcmDurationMs(chunk.pcm.size) +
+                pcmDurationMs(chunk.trailingSilenceBytes),
+        )
+        Phase4TtsMetrics.recordReadyAudio(_bufferHeadroomMs.value)
+        updateResourcePressure()
+
+        // A RAM hit is still mirrored into a new sequential disk render. This
+        // preserves the durable cache even when a seek/rebuild reuses nearby
+        // PCM before the previous chapter render had reached natural end.
+        if (!running.get()) return
+        cacheAppender?.let { ap ->
+            val pauseMs = pcmDurationMs(chunk.trailingSilenceBytes).toInt()
+            runCatching { ap.appendSentence(sentence, chunk.pcm, pauseMs) }
+                .onFailure { _cacheTeeErrors.update { it + 1 } }
+        }
+    }
+
+    private fun ramChunkFor(sentenceListIndex: Int): PcmChunk? {
+        val cache = ramCache ?: return null
+        val key = ramCacheKey(sentenceListIndex) ?: return null
+        val result = cache.get(key)
+        val stats = cache.stats()
+        // android.util.Log is a stub in pure JVM tests; metrics must never be
+        // allowed to turn a cache lookup into a producer failure.
+        runCatching {
+            Phase4TtsMetrics.recordRamCache(
+                hit = result != null,
+                entries = stats.entries,
+                bytes = stats.bytes,
+                hitRate = stats.hitRate,
+            )
+        }
+        return result
+    }
+
+    private fun retainRamChunk(sentenceListIndex: Int, chunk: PcmChunk) {
+        val cache = ramCache ?: return
+        val key = ramCacheKey(sentenceListIndex) ?: return
+        cache.put(key, chunk)
+    }
+
+    private fun ramCacheKey(sentenceListIndex: Int): TtsRamCache.Key? {
+        val namespace = ramCacheNamespace?.takeIf { it.isNotBlank() } ?: return null
+        val sentence = sentences.getOrNull(sentenceListIndex) ?: return null
+        return TtsRamCache.Key(
+            renderNamespace = namespace,
+            segmentId = "${sentence.index}:${sentence.startChar}:${sentence.endChar}",
+        )
     }
 
     /** Wrapper so the END_PILL identity check via `===` is type-safe and
      *  the data class equals isn't tempted to compare the empty pcm. */
     private class Item(val chunk: PcmChunk)
+    private data class GeneratedChunk(val chunk: PcmChunk?, val reservedMs: Long)
 
     private companion object {
         val END_PILL = Item(PcmChunk(-1, SentenceRange(-1, -1, -1), ByteArray(0), 0))

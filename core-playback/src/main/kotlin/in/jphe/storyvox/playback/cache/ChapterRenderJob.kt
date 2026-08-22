@@ -24,12 +24,14 @@ import `in`.jphe.storyvox.playback.PlaybackResourceGovernor
 import `in`.jphe.storyvox.playback.tts.CHUNKER_VERSION
 import `in`.jphe.storyvox.playback.tts.SpokenNumberNormalizer
 import `in`.jphe.storyvox.playback.tts.SentenceChunker
+import `in`.jphe.storyvox.playback.tts.TtsQualityPreset
 import `in`.jphe.storyvox.playback.tts.detectLocale
 import `in`.jphe.storyvox.playback.tts.source.trailingPauseMs
 import `in`.jphe.storyvox.playback.voice.EngineType
 import `in`.jphe.storyvox.playback.voice.UiVoiceInfo
 import `in`.jphe.storyvox.playback.voice.VoiceEngineRegistry
 import `in`.jphe.storyvox.playback.voice.VoiceManager
+import `in`.jphe.storyvox.playback.voice.toEngineKey
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.withLock
@@ -160,10 +162,18 @@ class ChapterRenderJob @AssistedInject constructor(
         // 4. Build the cache key. Render at the 1.0×/1.0× empty-dict
         // identity — see kdoc on speed/pitch quantization.
         val cacheKey = PcmCacheKey(
+            bookId = fictionId,
             chapterId = chapterId,
+            segmentId = "chapter-index-v$CHUNKER_VERSION",
+            textHash = PcmCacheKey.textHash(chapter.text),
+            engineId = voice.engineType.toEngineKey().engineId,
+            modelId = voice.id,
+            modelVersion = cacheModelVersionFor(voiceManager, voice),
             voiceId = voice.id,
             speedHundredths = PcmCacheKey.quantize(1.0f),
             pitchHundredths = PcmCacheKey.quantize(1.0f),
+            style = "steady|pause=1.0|a11y=0|autolang=false",
+            qualityPreset = TtsQualityPreset.AUTOMATIC.name,
             chunkerVersion = CHUNKER_VERSION,
             pronunciationDictHash = PronunciationDict.EMPTY.contentHash,
         )

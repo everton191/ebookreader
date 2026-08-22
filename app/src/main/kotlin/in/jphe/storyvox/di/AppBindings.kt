@@ -1,7 +1,10 @@
 package `in`.jphe.storyvox.di
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
+import android.os.IBinder
 import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import dagger.Module
@@ -1145,6 +1148,36 @@ internal class RealPlaybackControllerUi(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
+    /**
+     * Phase 4 — an application-context binding keeps EnginePlayer (and its
+     * loaded model) alive while this process is alive without posting a media
+     * notification before the user actually presses Play. startListening()
+     * still promotes the same service to foreground at the user gesture.
+     */
+    private val prewarmBindLock = Any()
+    @Volatile private var prewarmServiceBound = false
+    private val prewarmServiceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            prewarmServiceBound = true
+            // onCreate() has already bound EnginePlayer to the controller.
+            // A second request is harmless and closes vendor-specific callback
+            // ordering gaps where onServiceConnected arrives unusually early.
+            controller.prewarmEngine()
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            prewarmServiceBound = false
+        }
+
+        override fun onBindingDied(name: ComponentName?) {
+            prewarmServiceBound = false
+        }
+
+        override fun onNullBinding(name: ComponentName?) {
+            prewarmServiceBound = false
+        }
+    }
+
     /** #1489 — see [PlaybackControllerUi.chapterStartFailures]. Buffered +
      *  tryEmit so the abort (inside a scope.launch) never suspends on a slow
      *  collector; replay = 0 so a freshly-opened reader can't pick up a stale
@@ -1400,6 +1433,29 @@ internal class RealPlaybackControllerUi(
 
     override fun stopSpeaking() {
         controller.stopSpeaking()
+    }
+
+    override fun prewarmEngine() {
+        // Set the controller's pending latch before binding. Service.onCreate
+        // calls bindPlayer(), which consumes that latch and starts the real
+        // model load before the binder callback reaches this adapter.
+        controller.prewarmEngine()
+        synchronized(prewarmBindLock) {
+            if (prewarmServiceBound) return
+            prewarmServiceBound = runCatching {
+                context.bindService(
+                    Intent(context, StoryvoxPlaybackService::class.java),
+                    prewarmServiceConnection,
+                    Context.BIND_AUTO_CREATE,
+                )
+            }.onFailure { error ->
+                android.util.Log.w(
+                    "PlaybackBindings",
+                    "TTS prewarm service bind failed; Play will retry normally",
+                    error,
+                )
+            }.getOrDefault(false)
+        }
     }
 
     // Issue #121 — bookmark fan-out. controller methods are suspend

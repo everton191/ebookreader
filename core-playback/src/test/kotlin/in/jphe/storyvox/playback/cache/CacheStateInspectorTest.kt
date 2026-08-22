@@ -29,7 +29,7 @@ import org.robolectric.annotation.Config
  *    are nonetheless occupying space on the user's device
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(application = Application::class)
+@Config(application = Application::class, sdk = [35])
 class CacheStateInspectorTest {
 
     private lateinit var context: Application

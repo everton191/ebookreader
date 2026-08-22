@@ -1,5 +1,6 @@
 package `in`.jphe.storyvox.playback.tts.source
 
+import `in`.jphe.storyvox.playback.cache.TtsRamCache
 import `in`.jphe.storyvox.playback.tts.Sentence
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -11,6 +12,42 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class EngineStreamingSourceTest {
+
+    @Test
+    fun `second pipeline reuses exact segment from RAM without synthesis`() = runBlocking {
+        val sentence = Sentence(0, 0, 10, "One.")
+        val calls = java.util.concurrent.atomic.AtomicInteger(0)
+        val engine = FakeVoiceEngine(22050) {
+            calls.incrementAndGet()
+            ByteArray(1_000) { 7 }
+        }
+        // Includes audible PCM plus the punctuation silence bytes.
+        val cache = TtsRamCache(maxBytes = 32_000)
+
+        suspend fun source() = EngineStreamingSource(
+            sentences = listOf(sentence),
+            startSentenceIndex = 0,
+            engine = engine,
+            speed = 1f,
+            pitch = 1f,
+            engineMutex = Mutex(),
+            ramCache = cache,
+            ramCacheNamespace = "full-render-key",
+        )
+
+        val first = source()
+        assertEquals(1_000, first.nextChunk()?.pcm?.size)
+        assertNull(first.nextChunk())
+        first.close()
+
+        val second = source()
+        assertEquals(1_000, second.nextChunk()?.pcm?.size)
+        assertNull(second.nextChunk())
+        second.close()
+
+        assertEquals("the second pipeline must be a RAM hit", 1, calls.get())
+        assertEquals(1L, cache.stats().hits)
+    }
 
     @Test
     fun `nextChunk returns sentences in order then null at end`() = runBlocking {

@@ -132,6 +132,13 @@ fun HybridReaderScreen(
     val voicePacedPositionChar by viewModel.voicePacedPositionChar.collectAsStateWithLifecycle()
     val playback = state.playback
 
+    // Phase 4 — bind the persistent media service and load the selected local
+    // voice before the first Play tap. The call is idempotent and does not
+    // create an AudioTrack or start audible playback.
+    LaunchedEffect(viewModel) {
+        viewModel.prewarmEngine()
+    }
+
     // Chapter-completion celebration. The VM's confettiTrigger fires
     // Unit once per qualifying event (v0.5.00 OR v1.1 window); we flip a
     // local visible flag that drives the [LightMotes] overlay (v1.1

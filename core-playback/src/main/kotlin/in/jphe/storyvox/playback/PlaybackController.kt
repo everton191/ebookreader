@@ -287,7 +287,9 @@ class DefaultPlaybackController @Inject constructor(
             }
         }.stateIn(scope, SharingStarted.Eagerly, EngineState.Idle)
 
-    private var player: EnginePlayer? = null
+    private val playerBindingLock = Any()
+    @Volatile private var player: EnginePlayer? = null
+    @Volatile private var prewarmRequested = false
 
     /** Issue #189 — mirror of the bound player's recap-aloud state. Idle
      *  before any player binds (and between bindings); reflects the
@@ -344,7 +346,13 @@ class DefaultPlaybackController @Inject constructor(
     }
 
     fun bindPlayer(p: EnginePlayer) {
-        player = p
+        val shouldPrewarm = synchronized(playerBindingLock) {
+            player = p
+            prewarmRequested.also { requested ->
+                if (requested) prewarmRequested = false
+            }
+        }
+        if (shouldPrewarm) p.prewarmEngine()
         scope.launch {
             p.observableState.collect { update ->
                 val prev = _state.value
@@ -650,7 +658,9 @@ class DefaultPlaybackController @Inject constructor(
     }
 
     fun unbindPlayer() {
-        player = null
+        synchronized(playerBindingLock) {
+            player = null
+        }
         _recapPlayback.value = RecapPlaybackState.Idle
         _playbackPositionMs.value = 0L
         _warmingUp.value = false
@@ -835,7 +845,13 @@ class DefaultPlaybackController @Inject constructor(
         // engine's implementation is best-effort: skipped if a chapter
         // is already playing, idempotent across repeated calls, no error
         // surfaces if the voice isn't installed.
-        runCatching { player?.prewarmEngine() }
+        val boundPlayer = synchronized(playerBindingLock) {
+            player?.also { prewarmRequested = false } ?: run {
+                prewarmRequested = true
+                null
+            }
+        }
+        runCatching { boundPlayer?.prewarmEngine() }
     }
 
     override fun nextSentence() { player?.seekSentence(direction = 1) }
