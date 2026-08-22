@@ -1545,8 +1545,6 @@ private fun StoryvoxNavHostContent(
             ) {
                 AiSettingsScreen(
                     onBack = { navController.popBackStack() },
-                    onOpenAiSessions = { navController.navigate(StoryvoxRoutes.SETTINGS_AI_SESSIONS) },
-                    onOpenTeamsSignIn = { navController.navigate(StoryvoxRoutes.TEAMS_SIGN_IN) },
                 )
             }
             // Phase 1 scaffold (v0.5.42) — Accessibility subscreen. Push

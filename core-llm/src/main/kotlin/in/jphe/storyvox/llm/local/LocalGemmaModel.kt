@@ -57,10 +57,13 @@ class LocalGemmaModelInstaller(
     val manifest: LocalModelManifest = Gemma4E2bManifest.value,
 ) {
     private val modelsDir = File(context.filesDir, "local-models").apply { mkdirs() }
+    private val preferences = context.getSharedPreferences("local_gemma", Context.MODE_PRIVATE)
     private val target = File(modelsDir, "${manifest.id}.litertlm")
     private val partial = File(modelsDir, "${manifest.id}.litertlm.part")
     private val _state = MutableStateFlow<LocalModelState>(initialState())
     val state: StateFlow<LocalModelState> = _state.asStateFlow()
+    private val _enabled = MutableStateFlow(preferences.getBoolean("enabled", false) && installedFileOrNull() != null)
+    val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
 
     fun installedFileOrNull(): File? = target.takeIf { it.isFile && it.length() == manifest.sizeBytes }
 
@@ -103,6 +106,19 @@ class LocalGemmaModelInstaller(
             _state.value = LocalModelState.Failed(t.message ?: "Falha desconhecida ao instalar o modelo")
             throw t
         }
+    }
+
+    fun setEnabled(enabled: Boolean) {
+        val allowed = enabled && installedFileOrNull() != null
+        preferences.edit().putBoolean("enabled", allowed).apply()
+        _enabled.value = allowed
+    }
+
+    suspend fun delete() = withContext(Dispatchers.IO) {
+        setEnabled(false)
+        target.delete()
+        partial.delete()
+        _state.value = LocalModelState.NotInstalled
     }
 
     private fun initialState(): LocalModelState =
