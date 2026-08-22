@@ -108,13 +108,15 @@ object VoiceCatalog {
      *  ships in medium and high upstream (rhasspy/piper-voices
      *  doesn't publish a Cori-low), so the en_GB column is two
      *  entries to en_US's three — five voices total in the gate. */
+    /** The reader is intentionally Brazilian Portuguese only. */
     val featuredIds: List<String> = listOf(
-        "piper_lessac_en_US_low",
-        "piper_lessac_en_US_medium",
-        "piper_lessac_en_US_high",
-        "piper_cori_en_GB_medium",
-        "piper_cori_en_GB_high",
+        "piper_dii_pt_BR_high",
+        "piper_faber_pt_BR_medium",
     )
+
+    fun isBrazilianPortuguese(entry: CatalogEntry): Boolean =
+        entry.language.equals("pt_BR", ignoreCase = true) ||
+            entry.language.equals("pt-BR", ignoreCase = true)
     // #1372 — `internal` (was `private`) so each in-process
     // `VoiceEnginePlugin.catalogEntries()` can delegate here; the union
     // across plugins reproduces [voices]. Still the single source of the

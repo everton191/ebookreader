@@ -198,7 +198,9 @@ class VoiceManager @Inject constructor(
      *  populates it. Callers that want the live state should use
      *  [availableVoicesFlow] instead. */
     val availableVoices: List<UiVoiceInfo>
-        get() = VoiceCatalog.voices.map { it.toUiVoiceInfo(installed = false) }
+        get() = VoiceCatalog.voices
+            .filter(VoiceCatalog::isBrazilianPortuguese)
+            .map { it.toUiVoiceInfo(installed = false) }
 
     /** Hot Flow of [availableVoices] — combines the static catalog
      *  with the live Azure + System TTS rosters (#676). Use this when
@@ -207,6 +209,7 @@ class VoiceManager @Inject constructor(
     val availableVoicesFlow: Flow<List<UiVoiceInfo>> =
         azureVoiceProvider.voices.combine(systemTtsVoiceProvider.voices) { azure, system ->
             VoiceCatalog.voicesWithAzureAndSystemTts(azure, system)
+                .filter(VoiceCatalog::isBrazilianPortuguese)
                 .map { it.toUiVoiceInfo(installed = false) }
         }
 
@@ -239,6 +242,7 @@ class VoiceManager @Inject constructor(
         // presence makes every Supertonic speaker playable.
         val supertonicReady = isSupertonicSharedModelInstalled()
         VoiceCatalog.voicesWithAzureAndSystemTts(azureRoster, systemTtsRoster)
+            .filter(VoiceCatalog::isBrazilianPortuguese)
             .filter {
                 (it.id in installedIds &&
                     (it.engineType !is EngineType.Piper ||
