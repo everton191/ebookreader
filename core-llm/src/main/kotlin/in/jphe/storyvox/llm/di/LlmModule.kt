@@ -8,6 +8,7 @@ import `in`.jphe.storyvox.llm.feature.SummarizeTranscriptUseCase
 import `in`.jphe.storyvox.llm.local.LiteRtGemmaAiProvider
 import `in`.jphe.storyvox.llm.local.LocalAiProvider
 import `in`.jphe.storyvox.llm.local.LocalGemmaModelInstaller
+import `in`.jphe.storyvox.llm.narration.NarrationDirector
 import android.content.Context
 import dagger.Module
 import dagger.Provides
@@ -76,6 +77,10 @@ object LlmModule {
     @Singleton
     fun provideLocalAiProvider(installer: LocalGemmaModelInstaller): LocalAiProvider =
         LiteRtGemmaAiProvider(installer)
+
+    @Provides
+    @Singleton
+    fun provideNarrationDirector(provider: LocalAiProvider): NarrationDirector = NarrationDirector(provider)
 
     @Provides
     @Singleton

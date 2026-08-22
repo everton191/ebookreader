@@ -54,6 +54,8 @@ import `in`.jphe.storyvox.feature.browse.toUiFiction
 import `in`.jphe.storyvox.playback.PlaybackController
 import `in`.jphe.storyvox.playback.PlaybackState
 import `in`.jphe.storyvox.playback.PlaybackUiEvent
+import `in`.jphe.storyvox.playback.PlaybackResourceGovernor
+import `in`.jphe.storyvox.llm.narration.AiExecutionGate
 import `in`.jphe.storyvox.playback.tts.RecapPlaybackState
 import `in`.jphe.storyvox.playback.SPEED_BASELINE_CHARS_PER_SECOND
 import `in`.jphe.storyvox.playback.SleepTimerMode
@@ -78,6 +80,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -93,6 +96,17 @@ import `in`.jphe.storyvox.data.dictionary.DictionaryRepository
 @Module
 @InstallIn(SingletonComponent::class)
 object AppBindings {
+
+    /** Fase 5: local AI yields completely to current TTS/playback pressure. */
+    @Provides @Singleton
+    fun provideAiExecutionGate(): AiExecutionGate = object : AiExecutionGate {
+        override suspend fun awaitPermit() {
+            val state = PlaybackResourceGovernor.secondaryWorkFlow.first {
+                it != PlaybackResourceGovernor.SecondaryWork.SUSPENDED
+            }
+            if (state == PlaybackResourceGovernor.SecondaryWork.THROTTLED) delay(500)
+        }
+    }
 
     @Provides @Singleton
     fun provideFictionRepositoryUi(
