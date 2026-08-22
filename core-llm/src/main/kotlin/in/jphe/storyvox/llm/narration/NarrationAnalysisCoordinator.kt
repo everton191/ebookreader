@@ -26,7 +26,10 @@ class NarrationAnalysisCoordinator @Inject constructor(
         // Do not persist heuristic placeholders as if they were Gemma output.
         // If the optional local model is absent, normal neutral playback stays
         // available and a future enablement can analyze this same chapter.
-        if (!installer.enabled.value) return false
+        if (!installer.enabled.value) {
+            android.util.Log.i("NarrationAnalysis", "skipped chapter=$chapterId reason=model-disabled")
+            return false
+        }
         if (!store.needsAnalysis(
                 fictionId = fictionId,
                 chapterId = chapterId,
@@ -35,9 +38,20 @@ class NarrationAnalysisCoordinator @Inject constructor(
                 modelVersion = modelVersion,
                 textHash = director::textHash,
             )
-        ) return false
+        ) {
+            android.util.Log.i("NarrationAnalysis", "skipped chapter=$chapterId reason=plan-current")
+            return false
+        }
+        android.util.Log.i("NarrationAnalysis", "started chapter=$chapterId segments=${segments.size} windows=${(segments.size + MAX_SEGMENTS_PER_WINDOW - 1) / MAX_SEGMENTS_PER_WINDOW}")
         gate.awaitPermit()
-        val metadata = director.analyzeWindow(segments)
+        // A 2B model is much more reliable when it has to return a small,
+        // complete JSON array. Sending a whole long chapter in one request
+        // regularly led to truncated output and every segment falling back to
+        // the neutral heuristic.
+        val metadata = segments.chunked(MAX_SEGMENTS_PER_WINDOW).flatMap { window ->
+            gate.awaitPermit()
+            director.analyzeWindow(window)
+        }
         store.saveWindow(fictionId, chapterId, segments, metadata, analysisVersion, modelVersion, now, director::textHash)
         // Keep one durable identity per conservatively identified speaker.
         // No voice is invented here: manual casting remains authoritative and
@@ -57,8 +71,11 @@ class NarrationAnalysisCoordinator @Inject constructor(
                     now = now,
                 )
             }
+        val confident = metadata.count { it.confidence >= CHARACTER_BIBLE_MIN_CONFIDENCE }
+        android.util.Log.i("NarrationAnalysis", "completed chapter=$chapterId segments=${metadata.size} confident=$confident")
         return true
     }
 }
 
 private const val CHARACTER_BIBLE_MIN_CONFIDENCE = .60f
+private const val MAX_SEGMENTS_PER_WINDOW = 12

@@ -171,7 +171,9 @@ internal fun shouldAutoPlayAfterAdvance(stateAfterWait: PlaybackState): Boolean 
     stateAfterWait.isPlaying
 
 /** Bump when the persisted narration-segment contract changes. */
-private const val NARRATION_ANALYSIS_SCHEMA_VERSION = 1
+// v2 uses bounded analysis windows and a single JSON repair retry. Existing
+// v1 neutral fallback plans are invalidated and can be analyzed again.
+private const val NARRATION_ANALYSIS_SCHEMA_VERSION = 2
 private const val NARRATION_MIN_CONFIDENCE = .60f
 
 /**

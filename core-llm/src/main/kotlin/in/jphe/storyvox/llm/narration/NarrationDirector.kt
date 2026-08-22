@@ -32,11 +32,22 @@ class NarrationDirector(private val provider: LocalAiProvider) {
     suspend fun analyzeWindow(segments: List<NarrationInputSegment>): List<NarrationMetadata> {
         if (segments.isEmpty()) return emptyList()
         val byId = segments.associateBy { it.segmentId }
-        val result = provider.generate(prompt(segments), maxTokens = minOf(1024, segments.size * 80))
-        val parsed = (result as? LocalAiResult.Success)?.text?.let(::parseArray).orEmpty()
+        val result = provider.generate(prompt(segments), maxTokens = minOf(768, segments.size * 56))
+        var parsed = (result as? LocalAiResult.Success)?.text?.let(::parseArray).orEmpty()
+        // LiteRT models occasionally wrap correct JSON in prose or produce an
+        // incomplete first answer. One short repair retry is bounded and stays
+        // off the playback path; it is preferable to silently classifying a
+        // fully downloaded model as "neutral" forever.
+        if (parsed.isEmpty() && result is LocalAiResult.Success) {
+            android.util.Log.i("NarrationDirector", "invalid JSON; running one repair retry for ${segments.size} segments")
+            parsed = (provider.generate(repairPrompt(segments, result.text), maxTokens = minOf(768, segments.size * 56)) as? LocalAiResult.Success)
+                ?.text?.let(::parseArray).orEmpty()
+        }
+        val parsedById = parsed
             .filter { it.segmentId in byId }
             .associateBy { it.segmentId }
-        return segments.map { parsed[it.segmentId] ?: heuristic(it) }
+        android.util.Log.i("NarrationDirector", "window=${segments.size} parsed=${parsedById.size} fallback=${segments.size - parsedById.size}")
+        return segments.map { parsedById[it.segmentId] ?: heuristic(it) }
     }
 
     fun textHash(text: String): String = MessageDigest.getInstance("SHA-256")
@@ -44,20 +55,31 @@ class NarrationDirector(private val provider: LocalAiProvider) {
         .joinToString("") { "%02x".format(it) }
 
     private fun prompt(segments: List<NarrationInputSegment>) = buildString {
-        append("Você é um diretor de narração em pt-BR. Responda APENAS JSON array. ")
+        append("Você é um diretor de narração em pt-BR. Responda APENAS JSON array válido, sem markdown nem explicação. ")
         append("Cada item deve ter segmentId,type,speaker,emotion,intensity,confidence. ")
         append("type: narration|dialogue|thought|other. emotion: neutral|happy|sad|angry|fear|surprise|tender|tense|whisper|excited. ")
         append("Use speaker null quando não houver evidência conservadora. Segmentos:\n")
         segments.forEach { append("[").append(it.segmentId).append("] ").append(it.text).append('\n') }
     }
 
+    private fun repairPrompt(segments: List<NarrationInputSegment>, previous: String) = buildString {
+        append("Corrija a resposta abaixo para JSON array válido. Sem markdown e sem explicação. ")
+        append("Cada item precisa de segmentId,type,speaker,emotion,intensity,confidence. ")
+        append("Use somente os segmentId: ")
+        append(segments.joinToString(",") { it.segmentId })
+        append(". Resposta anterior: ").append(previous.take(4_000))
+    }
+
     private fun parseArray(raw: String): List<NarrationMetadata> = runCatching {
         val payload = raw.substringAfter('[', missingDelimiterValue = "").substringBeforeLast(']', missingDelimiterValue = "")
         if (payload.isEmpty()) return emptyList()
-        Json.parseToJsonElement("[$payload]").jsonArray.mapNotNull { element ->
+        Json { ignoreUnknownKeys = true; isLenient = true }
+            .parseToJsonElement("[$payload]").jsonArray.mapNotNull { element ->
             val obj = element.jsonObject
-            val type = obj["type"]?.jsonPrimitive?.contentOrNull?.let { runCatching { NarrationType.valueOf(it) }.getOrNull() } ?: return@mapNotNull null
-            val emotion = obj["emotion"]?.jsonPrimitive?.contentOrNull?.let { runCatching { NarrationEmotion.valueOf(it) }.getOrNull() } ?: return@mapNotNull null
+            val type = obj["type"]?.jsonPrimitive?.contentOrNull?.lowercase()
+                ?.let { runCatching { NarrationType.valueOf(it) }.getOrNull() } ?: return@mapNotNull null
+            val emotion = obj["emotion"]?.jsonPrimitive?.contentOrNull?.lowercase()
+                ?.let { runCatching { NarrationEmotion.valueOf(it) }.getOrNull() } ?: return@mapNotNull null
             val intensity = obj["intensity"]?.jsonPrimitive?.floatOrNull?.takeIf { it in 0f..1f } ?: return@mapNotNull null
             val confidence = obj["confidence"]?.jsonPrimitive?.floatOrNull?.takeIf { it in 0f..1f } ?: return@mapNotNull null
             val id = obj["segmentId"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
