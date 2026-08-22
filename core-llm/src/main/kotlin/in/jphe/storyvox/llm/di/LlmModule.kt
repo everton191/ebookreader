@@ -5,10 +5,15 @@ import `in`.jphe.storyvox.llm.LlmConfigProvider
 import `in`.jphe.storyvox.llm.auth.AnthropicTeamsAuthApi
 import `in`.jphe.storyvox.llm.feature.DefaultSummarizeTranscriptUseCase
 import `in`.jphe.storyvox.llm.feature.SummarizeTranscriptUseCase
+import `in`.jphe.storyvox.llm.local.LiteRtGemmaAiProvider
+import `in`.jphe.storyvox.llm.local.LocalAiProvider
+import `in`.jphe.storyvox.llm.local.LocalGemmaModelInstaller
+import android.content.Context
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -58,6 +63,19 @@ object LlmModule {
         .followSslRedirects(true)
         .retryOnConnectionFailure(true)
         .build()
+
+    /** Local-only model download path. This binding never selects a cloud provider. */
+    @Provides
+    @Singleton
+    fun provideLocalGemmaInstaller(
+        @ApplicationContext context: Context,
+        @LlmHttp http: OkHttpClient,
+    ): LocalGemmaModelInstaller = LocalGemmaModelInstaller(context, http)
+
+    @Provides
+    @Singleton
+    fun provideLocalAiProvider(installer: LocalGemmaModelInstaller): LocalAiProvider =
+        LiteRtGemmaAiProvider(installer)
 
     @Provides
     @Singleton
