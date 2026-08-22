@@ -93,7 +93,7 @@
     <string name="reader_from_the_start">Desde o início</string>
     <string name="reader_start_listening">▶  Começar a ouvir</string>
     <string name="reader_empty_library_title">Sua biblioteca está vazia</string>
-    <string name="reader_empty_library_body">Adicione um livro para ouvir. O Candela guarda automaticamente onde você parou.</string>
+    <string name="reader_empty_library_body">Adicione um livro para ouvir. O Simplifica Reader IA guarda automaticamente onde você parou.</string>
     <string name="reader_browse_realms">Adicionar um livro</string>
     <string name="reader_browse_realms_arrow">Adicionar um livro →</string>
     <string name="reader_open_settings">Abrir configurações</string>
@@ -163,9 +163,9 @@
 
     <string name="onboarding_step_n_of_m">Etapa %1$d de %2$d</string>
     <string name="onboarding_welcome_headline">Histórias lidas para você.</string>
-    <string name="onboarding_welcome_body">O Candela lê livros, guias e artigos com vozes agradáveis. Grátis, para sempre e sem anúncios.</string>
+    <string name="onboarding_welcome_body">O Simplifica Reader IA lê livros, guias e artigos com vozes agradáveis. Grátis, para sempre e sem anúncios.</string>
     <string name="onboarding_get_started">Começar</string>
-    <string name="onboarding_skip_welcome">Já usei o Candela</string>
+    <string name="onboarding_skip_welcome">Já usei o Simplifica Reader IA</string>
     <string name="onboarding_first_fiction_headline">O que você quer ouvir?</string>
     <string name="onboarding_first_fiction_subtitle">Escolha um ponto de partida. Você poderá adicionar mais livros depois.</string>
     <string name="onboarding_pick_te_title">Explorar guias gratuitos</string>
