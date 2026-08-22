@@ -13,6 +13,7 @@ class NarrationAnalysisCoordinator @Inject constructor(
     private val director: NarrationDirector,
     private val store: NarrationPlanStore,
     private val installer: LocalGemmaModelInstaller,
+    private val characterBible: CharacterBibleStore,
 ) {
     suspend fun analyzeAndSave(
         fictionId: String,
@@ -38,6 +39,26 @@ class NarrationAnalysisCoordinator @Inject constructor(
         gate.awaitPermit()
         val metadata = director.analyzeWindow(segments)
         store.saveWindow(fictionId, chapterId, segments, metadata, analysisVersion, modelVersion, now, director::textHash)
+        // Keep one durable identity per conservatively identified speaker.
+        // No voice is invented here: manual casting remains authoritative and
+        // the player falls back to the narrator until a compatible choice is
+        // present in the CharacterBible.
+        metadata.asSequence()
+            .filter { it.confidence >= CHARACTER_BIBLE_MIN_CONFIDENCE }
+            .mapNotNull { item -> item.speaker?.trim()?.takeIf(String::isNotEmpty)?.let { it to item.confidence } }
+            .groupBy({ it.first }, { it.second })
+            .forEach { (speaker, confidences) ->
+                characterBible.recordSuggestion(
+                    fictionId = fictionId,
+                    characterId = characterBible.stableCharacterId(speaker),
+                    displayName = speaker,
+                    aliases = setOf(speaker),
+                    confidence = confidences.max(),
+                    now = now,
+                )
+            }
         return true
     }
 }
+
+private const val CHARACTER_BIBLE_MIN_CONFIDENCE = .60f

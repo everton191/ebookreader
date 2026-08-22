@@ -11,6 +11,14 @@ import kotlinx.serialization.json.jsonPrimitive
 
 /** Conservative identity store: never merges a low-confidence alias automatically. */
 class CharacterBibleStore @Inject constructor(private val dao: CharacterBibleDao) {
+    /** Stable local key used when a narration analysis first observes a name. */
+    fun stableCharacterId(observedName: String): String =
+        observedName.trim().lowercase()
+            .replace(Regex("[^\\p{L}\\p{N}]+"), "-")
+            .trim('-')
+            .take(80)
+            .ifBlank { "character" }
+
     suspend fun resolveKnownCharacter(fictionId: String, observedName: String): CharacterBibleEntry? {
         val key = normalize(observedName)
         return dao.forFiction(fictionId).firstOrNull { entry ->
