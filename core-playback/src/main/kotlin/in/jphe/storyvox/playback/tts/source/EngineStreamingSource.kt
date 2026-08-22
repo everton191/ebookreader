@@ -887,13 +887,14 @@ class EngineStreamingSource(
                     activeIndex = null
                     continue
                 }
+                val polishedPcm = PcmDiiClarity.apply(metricsVoiceId, pcm)
                 Phase4TtsMetrics.recordSegment(
                     metricsEngineId, metricsVoiceId, metricsQuality, spokenText.length,
-                    generationMs, pcm.size, workerEngine.sampleRate,
+                    generationMs, polishedPcm.size, workerEngine.sampleRate,
                 )
                 recordPrefetchRuntimeSample(
                     generationMs = generationMs,
-                    pcmBytes = pcm.size,
+                    pcmBytes = polishedPcm.size,
                     sourceSampleRate = workerEngine.sampleRate,
                 )
                 if (!running.get()) break
@@ -907,7 +908,7 @@ class EngineStreamingSource(
                 val chunk = PcmChunk(
                         sentenceIndex = i,
                         range = SentenceRange(s.index, s.startChar, s.endChar),
-                        pcm = pcm,
+                        pcm = polishedPcm,
                         trailingSilenceBytes = silenceBytes,
                     )
                 retainRamChunk(i, chunk)
@@ -987,13 +988,14 @@ class EngineStreamingSource(
                     activeIndex = null
                     continue
                 }
+                val polishedPcm = PcmDiiClarity.apply(metricsVoiceId, pcm)
                 Phase4TtsMetrics.recordSegment(
                     metricsEngineId, metricsVoiceId, metricsQuality, spokenText.length,
-                    generationMs, pcm.size, engine.sampleRate,
+                    generationMs, polishedPcm.size, engine.sampleRate,
                 )
                 recordPrefetchRuntimeSample(
                     generationMs = generationMs,
-                    pcmBytes = pcm.size,
+                    pcmBytes = polishedPcm.size,
                     sourceSampleRate = engine.sampleRate,
                 )
                 if (!running.get()) return@launch
@@ -1019,7 +1021,7 @@ class EngineStreamingSource(
                 val chunk = PcmChunk(
                     sentenceIndex = i,
                     range = SentenceRange(s.index, s.startChar, s.endChar),
-                    pcm = pcm,
+                    pcm = polishedPcm,
                     trailingSilenceBytes = silenceBytes,
                 )
                 retainRamChunk(i, chunk)

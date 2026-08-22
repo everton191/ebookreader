@@ -6397,6 +6397,7 @@ class EnginePlayer @AssistedInject constructor(
             append("|pause=").append(currentPunctuationPauseMultiplier)
             append("|a11y=").append(cachedA11yExtraSilenceMs)
             append("|autolang=").append(cachedAutoLanguageDetection)
+            append("|dii-clarity=v1")
         },
         qualityPreset = TtsQualityPreset.AUTOMATIC.name,
         chunkerVersion = CHUNKER_VERSION,
