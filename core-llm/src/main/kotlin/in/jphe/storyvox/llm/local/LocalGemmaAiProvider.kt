@@ -2,6 +2,7 @@ package `in`.jphe.storyvox.llm.local
 
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.Content
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -38,7 +39,9 @@ class LiteRtGemmaAiProvider(
             val activeEngine = engine ?: createEngine(model, maxTokens).also { engine = it }
             val reply = withContext(Dispatchers.Default) {
                 activeEngine.createConversation().use { conversation ->
-                    conversation.sendMessage(prompt).contents.toString()
+                    conversation.sendMessage(prompt).contents.contents
+                        .filterIsInstance<Content.Text>()
+                        .joinToString(separator = "") { it.text }
                 }
             }
             LocalAiResult.Success(reply)

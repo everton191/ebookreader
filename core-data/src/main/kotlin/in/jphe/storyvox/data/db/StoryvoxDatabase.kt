@@ -9,6 +9,7 @@ import `in`.jphe.storyvox.data.db.dao.AuthDao
 import `in`.jphe.storyvox.data.db.dao.ChapterDao
 import `in`.jphe.storyvox.data.db.dao.ChapterHistoryDao
 import `in`.jphe.storyvox.data.db.dao.CharacterVoiceDao
+import `in`.jphe.storyvox.data.db.dao.CharacterBibleDao
 import `in`.jphe.storyvox.data.db.dao.FictionDao
 import `in`.jphe.storyvox.data.db.dao.FictionMemoryDao
 import `in`.jphe.storyvox.data.db.dao.FictionShelfDao
@@ -17,12 +18,14 @@ import `in`.jphe.storyvox.data.db.dao.ListeningStatsDao
 import `in`.jphe.storyvox.data.db.dao.LlmMessageDao
 import `in`.jphe.storyvox.data.db.dao.LlmSessionDao
 import `in`.jphe.storyvox.data.db.dao.PlaybackDao
+import `in`.jphe.storyvox.data.db.dao.NarrationPlanDao
 import `in`.jphe.storyvox.data.db.dao.TeleprompterScriptDao
 import `in`.jphe.storyvox.data.db.entity.Annotation
 import `in`.jphe.storyvox.data.db.entity.AuthCookie
 import `in`.jphe.storyvox.data.db.entity.Chapter
 import `in`.jphe.storyvox.data.db.entity.ChapterHistory
 import `in`.jphe.storyvox.data.db.entity.CharacterVoice
+import `in`.jphe.storyvox.data.db.entity.CharacterBibleEntry
 import `in`.jphe.storyvox.data.db.entity.Fiction
 import `in`.jphe.storyvox.data.db.entity.FictionMemoryEntry
 import `in`.jphe.storyvox.data.db.entity.FictionShelf
@@ -30,6 +33,7 @@ import `in`.jphe.storyvox.data.db.entity.InboxEvent
 import `in`.jphe.storyvox.data.db.entity.LlmSession
 import `in`.jphe.storyvox.data.db.entity.LlmStoredMessage
 import `in`.jphe.storyvox.data.db.entity.PlaybackPosition
+import `in`.jphe.storyvox.data.db.entity.NarrationPlanSegment
 import `in`.jphe.storyvox.data.db.entity.TeleprompterScript
 
 @Database(
@@ -67,6 +71,8 @@ import `in`.jphe.storyvox.data.db.entity.TeleprompterScript
         // v18 (#1369 script manager) — user-authored teleprompter scripts
         // (save/edit/organize). Standalone rows with no FK to fiction/chapter.
         TeleprompterScript::class,
+        NarrationPlanSegment::class,
+        CharacterBibleEntry::class,
     ],
     // v11 (#965 per-chapter playback position) — PlaybackPosition PK changes
     // from `fictionId` to composite `(fictionId, chapterId)` so each chapter
@@ -109,7 +115,7 @@ import `in`.jphe.storyvox.data.db.entity.TeleprompterScript
     // split) force-revalidates pre-improvement caches on next open instead of
     // serving a structurally-stale list. Purely additive NOT NULL DEFAULT 0
     // column. See MIGRATION_18_19.
-    version = 19,
+    version = 20,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -131,6 +137,8 @@ abstract class StoryvoxDatabase : RoomDatabase() {
 
     // Issue #1369 — user-authored teleprompter scripts (save/edit/organize).
     abstract fun teleprompterScriptDao(): TeleprompterScriptDao
+    abstract fun narrationPlanDao(): NarrationPlanDao
+    abstract fun characterBibleDao(): CharacterBibleDao
 
     // Issue #1235 — read-only aggregate queries for the listening-stats
     // dashboard. No entity of its own; aggregates chapter_history +

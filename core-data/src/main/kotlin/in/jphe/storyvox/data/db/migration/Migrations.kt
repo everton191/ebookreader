@@ -564,6 +564,18 @@ val MIGRATION_18_19: Migration = object : Migration(18, 19) {
     }
 }
 
+// v20 (Fase 5) — additive local AI metadata. Text hashes and versions make
+// invalidation granular; manual casting is intentionally separate from AI.
+val MIGRATION_19_20: Migration = object : Migration(19, 20) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("""CREATE TABLE IF NOT EXISTS `narration_plan_segment` (`fictionId` TEXT NOT NULL, `chapterId` TEXT NOT NULL, `segmentId` TEXT NOT NULL, `segmentType` TEXT NOT NULL, `speaker` TEXT, `emotion` TEXT NOT NULL, `intensity` REAL NOT NULL, `confidence` REAL NOT NULL, `analysisVersion` INTEGER NOT NULL, `modelVersion` TEXT NOT NULL, `textHash` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`fictionId`, `chapterId`, `segmentId`), FOREIGN KEY(`fictionId`) REFERENCES `fiction`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE, FOREIGN KEY(`chapterId`) REFERENCES `chapter`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)""")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_narration_plan_segment_fictionId` ON `narration_plan_segment` (`fictionId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_narration_plan_segment_chapterId` ON `narration_plan_segment` (`chapterId`)")
+        db.execSQL("""CREATE TABLE IF NOT EXISTS `character_bible_entry` (`fictionId` TEXT NOT NULL, `characterId` TEXT NOT NULL, `displayName` TEXT NOT NULL, `aliasesJson` TEXT NOT NULL DEFAULT '[]', `description` TEXT, `suggestedVoiceId` TEXT, `manualVoiceId` TEXT, `manualOverride` INTEGER NOT NULL, `confidence` REAL NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`fictionId`, `characterId`), FOREIGN KEY(`fictionId`) REFERENCES `fiction`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)""")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_character_bible_entry_fictionId_displayName` ON `character_bible_entry` (`fictionId`, `displayName`)")
+    }
+}
+
 val ALL_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
@@ -583,4 +595,5 @@ val ALL_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_16_17,
     MIGRATION_17_18,
     MIGRATION_18_19,
+    MIGRATION_19_20,
 )

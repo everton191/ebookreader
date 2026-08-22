@@ -27,6 +27,7 @@ import `in`.jphe.storyvox.data.db.dao.AuthDao
 import `in`.jphe.storyvox.data.db.dao.ChapterDao
 import `in`.jphe.storyvox.data.db.dao.ChapterHistoryDao
 import `in`.jphe.storyvox.data.db.dao.CharacterVoiceDao
+import `in`.jphe.storyvox.data.db.dao.CharacterBibleDao
 import `in`.jphe.storyvox.data.db.dao.FictionDao
 import `in`.jphe.storyvox.data.db.dao.FictionMemoryDao
 import `in`.jphe.storyvox.data.db.dao.FictionShelfDao
@@ -35,6 +36,7 @@ import `in`.jphe.storyvox.data.db.dao.ListeningStatsDao
 import `in`.jphe.storyvox.data.db.dao.LlmMessageDao
 import `in`.jphe.storyvox.data.db.dao.LlmSessionDao
 import `in`.jphe.storyvox.data.db.dao.PlaybackDao
+import `in`.jphe.storyvox.data.db.dao.NarrationPlanDao
 import `in`.jphe.storyvox.data.db.dao.TeleprompterScriptDao
 import `in`.jphe.storyvox.data.db.migration.ALL_MIGRATIONS
 import `in`.jphe.storyvox.data.briefing.BriefingBuilder
@@ -139,6 +141,8 @@ object DataModule {
     @Provides fun annotationDao(db: StoryvoxDatabase): AnnotationDao = db.annotationDao()
     // Issue #1283 — per-character voice assignment map.
     @Provides fun characterVoiceDao(db: StoryvoxDatabase): CharacterVoiceDao = db.characterVoiceDao()
+    @Provides fun narrationPlanDao(db: StoryvoxDatabase): NarrationPlanDao = db.narrationPlanDao()
+    @Provides fun characterBibleDao(db: StoryvoxDatabase): CharacterBibleDao = db.characterBibleDao()
     // Issue #1369 — user-authored teleprompter scripts (save/edit/organize).
     @Provides fun teleprompterScriptDao(db: StoryvoxDatabase): TeleprompterScriptDao = db.teleprompterScriptDao()
     // Issue #1235 — read-only aggregate DAO for the listening-stats dashboard.
