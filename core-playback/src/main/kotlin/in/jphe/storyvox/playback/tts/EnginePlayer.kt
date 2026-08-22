@@ -175,6 +175,10 @@ internal fun shouldAutoPlayAfterAdvance(stateAfterWait: PlaybackState): Boolean 
 // v1 neutral fallback plans are invalidated and can be analyzed again.
 private const val NARRATION_ANALYSIS_SCHEMA_VERSION = 2
 private const val NARRATION_MIN_CONFIDENCE = .60f
+// The 2B local model can monopolize the CPU on phones while an inference is
+// running. Keep automatic analysis off until it has an explicit, user-started
+// background flow with progress and cancellation; playback must stay smooth.
+private const val AUTO_NARRATION_ANALYSIS_ENABLED = false
 
 /**
  * Issue #1262 — wait for a chapter's body to land in Room before
@@ -606,6 +610,13 @@ class EnginePlayer @AssistedInject constructor(
         chapterId: String,
         chapterSentences: List<Sentence>,
     ) {
+        if (!AUTO_NARRATION_ANALYSIS_ENABLED) {
+            android.util.Log.i(
+                "NarrationAnalysis",
+                "skipped chapter=$chapterId reason=automatic-analysis-disabled",
+            )
+            return
+        }
         val key = "$fictionId:$chapterId"
         if (narrationAnalysisJobs[key]?.isActive == true) return
         val segments = chapterSentences.map { sentence ->

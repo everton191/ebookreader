@@ -798,11 +798,9 @@ class VoiceManager @Inject constructor(
      * at least one System TTS voice via [SystemTtsVoiceProvider], pick
      * the first roster entry as the active voice.
      *
-     * "First entry" lands on the highest-priority English locale
-     * (en-US, en-GB, en-AU, etc.) per the roster's pre-sort, with
-     * offline voices preferred over network ones — exactly what a
-     * casual or sight-impaired user expects on first launch: an
-     * English voice that works without Wi-Fi.
+     * Only Brazilian Portuguese entries are eligible. The app is PT-BR-only,
+     * so a first-run fallback must never silently seed an English system
+     * voice just because that roster happens to sort first.
      *
      * Idempotent: re-running this after the user has chosen any other
      * voice is a no-op (we don't override user intent).
@@ -823,7 +821,8 @@ class VoiceManager @Inject constructor(
         // can't seed anyway).
         val roster = systemTtsVoiceProvider.voices.first()
         if (roster.isEmpty()) return
-        val firstEntry = VoiceCatalog.systemTtsEntriesFromRoster(roster).firstOrNull() ?: return
+        val firstEntry = VoiceCatalog.systemTtsEntriesFromRoster(roster)
+            .firstOrNull(VoiceCatalog::isBrazilianPortuguese) ?: return
         store.edit { p ->
             // Defensive: another setActive call may have raced this
             // suspend chain. Re-check inside the edit block — if a
