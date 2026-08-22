@@ -25,6 +25,8 @@ import com.google.common.util.concurrent.ListenableFuture
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
+import `in`.jphe.storyvox.data.db.dao.CharacterBibleDao
+import `in`.jphe.storyvox.data.db.dao.NarrationPlanDao
 import `in`.jphe.storyvox.data.log.DebugLog
 import `in`.jphe.storyvox.data.repository.ChapterRepository
 import `in`.jphe.storyvox.data.repository.HistoryRepository
@@ -69,6 +71,7 @@ import `in`.jphe.storyvox.playback.tts.source.CacheFileSource
 import `in`.jphe.storyvox.playback.tts.source.EngineStreamingSource
 import `in`.jphe.storyvox.playback.tts.source.PcmSource
 import `in`.jphe.storyvox.playback.voice.EngineType
+import `in`.jphe.storyvox.playback.voice.CharacterCasting
 import `in`.jphe.storyvox.playback.voice.ModelSpec
 import `in`.jphe.storyvox.playback.voice.StreamingPoolLifecycle
 import `in`.jphe.storyvox.playback.voice.StreamingSynth
@@ -76,6 +79,7 @@ import `in`.jphe.storyvox.playback.voice.StreamingTuning
 import `in`.jphe.storyvox.playback.voice.VoiceCatalog
 import `in`.jphe.storyvox.playback.voice.VoiceFamilyIds
 import `in`.jphe.storyvox.playback.voice.VoiceManager
+import `in`.jphe.storyvox.playback.voice.VoiceResolver
 import `in`.jphe.storyvox.playback.voice.toEngineKey
 import java.io.File
 import java.security.MessageDigest
@@ -168,6 +172,7 @@ internal fun shouldAutoPlayAfterAdvance(stateAfterWait: PlaybackState): Boolean 
 
 /** Bump when the persisted narration-segment contract changes. */
 private const val NARRATION_ANALYSIS_SCHEMA_VERSION = 1
+private const val NARRATION_MIN_CONFIDENCE = .60f
 
 /**
  * Issue #1262 — wait for a chapter's body to land in Room before
@@ -574,6 +579,9 @@ class EnginePlayer @AssistedInject constructor(
      * para tocar. Esta dependência nunca é aguardada pelo caminho de áudio.
      */
     private val narrationAnalysisCoordinator: NarrationAnalysisCoordinator,
+    /** Persisted Fase 5 metadata is read only while a pipeline is built. */
+    private val narrationPlanDao: NarrationPlanDao,
+    private val characterBibleDao: CharacterBibleDao,
 ) : SimpleBasePlayer(Looper.getMainLooper()) {
 
     @AssistedFactory
@@ -625,6 +633,55 @@ class EnginePlayer @AssistedInject constructor(
                 withContext(Dispatchers.Main.immediate) { narrationAnalysisJobs.remove(key) }
             }
         }
+    }
+
+    /**
+     * Resolves persisted metadata into per-sentence synthesis settings. This
+     * is intentionally a build-time snapshot: the active pipeline stays
+     * deterministic, while a plan that finishes during playback is applied on
+     * the next seek/chapter/open instead of interrupting spoken audio.
+     *
+     * Only Kokoro receives a different speaker id because its speakers share
+     * one loaded model. Other engines retain the current narrator model; a
+     * Piper model swap per sentence would drain the queue and is forbidden.
+     */
+    private suspend fun narrationDirectivesForCurrentChapter(): Map<Int, EngineStreamingSource.NarrationSynthesisDirective> {
+        val fictionId = _observableState.value.currentFictionId ?: return emptyMap()
+        val chapterId = _observableState.value.currentChapterId ?: return emptyMap()
+        val narratorVoiceId = loadedVoiceId ?: return emptyMap()
+        val plans = withContext(Dispatchers.IO) { narrationPlanDao.chapterSnapshot(fictionId, chapterId) }
+        if (plans.isEmpty()) return emptyMap()
+        val castings = withContext(Dispatchers.IO) { characterBibleDao.forFiction(fictionId) }
+            .flatMap { entry ->
+                val casting = CharacterCasting(
+                    characterId = entry.characterId,
+                    suggestedVoiceId = entry.suggestedVoiceId,
+                    manualVoiceId = entry.manualVoiceId,
+                    manualOverride = entry.manualOverride,
+                )
+                listOf(entry.characterId to casting, entry.displayName to casting)
+            }
+            .toMap()
+        return plans.mapNotNull { plan ->
+            val index = plan.segmentId.toIntOrNull() ?: return@mapNotNull null
+            // Low-confidence attribution falls back to the neutral narrator.
+            if (plan.confidence < NARRATION_MIN_CONFIDENCE) return@mapNotNull null
+            val resolution = VoiceResolver.resolve(
+                speakerId = plan.speaker,
+                emotion = plan.emotion,
+                castings = castings,
+                narratorVoiceId = narratorVoiceId,
+                globalVoiceId = narratorVoiceId,
+            )
+            val speakerId = (VoiceCatalog.byId(resolution.voiceId)?.engineType as? EngineType.Kokoro)
+                ?.speakerId
+            val directive = EngineStreamingSource.NarrationSynthesisDirective(
+                speedMultiplier = resolution.speedMultiplier,
+                pitchMultiplier = resolution.pitchMultiplier,
+                kokoroSpeakerId = speakerId,
+            )
+            if (directive == EngineStreamingSource.NarrationSynthesisDirective()) null else index to directive
+        }.toMap()
     }
 
     private var sentences: List<Sentence> = emptyList()
@@ -689,6 +746,8 @@ class EnginePlayer @AssistedInject constructor(
     @Volatile private var loadedVoiceId: String? = null
     /** Latest DataStore-backed selection, independent from the loaded model. */
     @Volatile private var selectedVoiceId: String? = null
+    /** Set immediately before a serial Kokoro utterance by the narration plan. */
+    @Volatile private var narrationKokoroSpeakerOverride: Int? = null
     @Volatile private var loadedVoiceLanguage: String? = null
     @Volatile private var loadedModelVersion: String = "unknown"
     /** Phase 4 baseline: monotonic timestamp from the user's play request to
@@ -3189,6 +3248,18 @@ class EnginePlayer @AssistedInject constructor(
         } else {
             secondaryHandles
         }
+        val narrationDirectives = narrationDirectivesForCurrentChapter()
+        val narrationPlanActive = narrationDirectives.isNotEmpty()
+        if (narrationPlanActive) {
+            // A changed manual cast or analysis result must never replay an old
+            // single-voice PCM cache. Keep this first implementation bounded:
+            // live narrated chapters run serially and bypass PCM/RAM caching.
+            android.util.Log.i(
+                "EnginePlayer",
+                "narration-plan active: ${narrationDirectives.size} directives; serial uncached synthesis",
+            )
+        }
+
         // PR-D (#86) — build the cache key for this (chapter, voice,
         // speed, pitch, dict) tuple. All five pieces of identity must
         // be known; if any is null we skip the cache write entirely
@@ -3211,7 +3282,7 @@ class EnginePlayer @AssistedInject constructor(
         val voiceIdForCache = loadedVoiceId?.let {
             if (routingActiveForCache) "$it+autolang" else it
         }
-        val cacheKey: PcmCacheKey? = if (
+        val cacheKey: PcmCacheKey? = if (!narrationPlanActive &&
             chapterIdForCache != null && voiceIdForCache != null
         ) {
             engineType?.let { resolvedEngineType ->
@@ -3350,12 +3421,15 @@ class EnginePlayer @AssistedInject constructor(
                 queueCapacity = queueCapacity,
                 pronunciationDictApply = pronunciationDict::apply,
                 speechTextNormalize = { text -> SpokenNumberNormalizer.normalize(text, loadedVoiceLanguage) },
-                secondaryEngines = effectiveSecondaryHandles,
+                narrationDirectiveForSentence = { sentence ->
+                    narrationDirectives[sentence.index] ?: EngineStreamingSource.NarrationSynthesisDirective()
+                },
+                secondaryEngines = if (narrationPlanActive) emptyList() else effectiveSecondaryHandles,
                 powerSaveMode = powerSaveMonitor.isPowerSaveMode.value,
                 metricsEngineId = engineType.toString(),
                 metricsVoiceId = loadedVoiceId ?: "unknown",
                 metricsQuality = TtsQualityPreset.AUTOMATIC.name,
-                ramCache = ttsRamCache,
+                ramCache = if (narrationPlanActive) null else ttsRamCache,
                 ramCacheNamespace = cacheKey?.fileBaseName(),
             )
         }
@@ -4190,6 +4264,12 @@ class EnginePlayer @AssistedInject constructor(
                     else -> EngineSampleRateCache.piperRate()
                 }.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
 
+                override fun prepareNarrationDirective(
+                    directive: EngineStreamingSource.NarrationSynthesisDirective,
+                ) {
+                    narrationKokoroSpeakerOverride = directive.kokoroSpeakerId
+                }
+
                 override fun generateAudioPCM(text: String, speed: Float, pitch: Float): ByteArray? {
                     // Issue #801 — respect power-save mode on the producer thread.
                     AndroidProcess.setThreadPriority(producerPriority())
@@ -4217,7 +4297,8 @@ class EnginePlayer @AssistedInject constructor(
                             // across Kokoro's one shared model, so re-asserting
                             // per sentence is cheap.
                             KokoroEngine.getInstance().setActiveSpeakerId(
-                                routeKokoroSpeaker(text, engineType.speakerId),
+                                narrationKokoroSpeakerOverride
+                                    ?: routeKokoroSpeaker(text, engineType.speakerId),
                             )
                             KokoroEngine.getInstance().generateAudioPCM(text, speed, pitch)
                         }

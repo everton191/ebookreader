@@ -131,6 +131,12 @@ class EngineStreamingSource(
     private val pronunciationDictApply: (String) -> String = { it },
     private val speechTextNormalize: (String) -> String = { it },
     /**
+     * Optional persisted narration metadata. A directive changes only the
+     * current utterance; it never waits for AI or mutates reader ranges.
+     * Voice-changing directives force the caller onto this serial producer.
+     */
+    private val narrationDirectiveForSentence: (Sentence) -> NarrationSynthesisDirective = { NarrationSynthesisDirective() },
+    /**
      * Tier 3 (#88) — list of secondary engine handles for parallel
      * synth. When non-empty, the producer fans out across the
      * primary [engine] PLUS each secondary, so [secondaryEngines.size + 1]
@@ -176,11 +182,19 @@ class EngineStreamingSource(
     private val ramCacheNamespace: String? = null,
 ) : PcmSource {
 
+    data class NarrationSynthesisDirective(
+        val speedMultiplier: Float = 1f,
+        val pitchMultiplier: Float = 1f,
+        val kokoroSpeakerId: Int? = null,
+    )
+
     /** SAM-style handle so tests can fake the engine without pulling the
      *  VoxSherpa AAR onto the JVM unit-test classpath. EnginePlayer wraps
      *  the singleton VoiceEngine / KokoroEngine in this. */
     interface VoiceEngineHandle {
         val sampleRate: Int
+        /** Called under the shared engine mutex immediately before synthesis. */
+        fun prepareNarrationDirective(directive: NarrationSynthesisDirective) = Unit
         fun generateAudioPCM(text: String, speed: Float, pitch: Float): ByteArray?
     }
 
@@ -829,6 +843,7 @@ class EngineStreamingSource(
             for (i in jobChan) {
                 if (!running.get()) break
                 val s = sentences[i]
+                val narrationDirective = narrationDirectiveForSentence(s)
                 activeReservationMs = awaitPrefetchCapacity(estimateSegmentAudioMs(s.text))
                 if (activeReservationMs <= 0L) break
                 activeIndex = i
@@ -846,10 +861,20 @@ class EngineStreamingSource(
                 val pcm = if (useEngineMutex) {
                     engineMutex.withLock {
                         if (!running.get()) return@withLock null
-                        workerEngine.generateAudioPCM(spokenText, speed, pitch)
+                        workerEngine.prepareNarrationDirective(narrationDirective)
+                        workerEngine.generateAudioPCM(
+                            spokenText,
+                            speed * narrationDirective.speedMultiplier,
+                            pitch * narrationDirective.pitchMultiplier,
+                        )
                     }
                 } else {
-                    workerEngine.generateAudioPCM(spokenText, speed, pitch)
+                    workerEngine.prepareNarrationDirective(narrationDirective)
+                    workerEngine.generateAudioPCM(
+                        spokenText,
+                        speed * narrationDirective.speedMultiplier,
+                        pitch * narrationDirective.pitchMultiplier,
+                    )
                 }
                 val generationMs = (System.nanoTime() - generationStart) / 1_000_000L
                 if (pcm == null) {
@@ -925,6 +950,7 @@ class EngineStreamingSource(
             for (i in fromIndex until sentences.size) {
                 if (!running.get()) return@launch
                 val s = sentences[i]
+                val narrationDirective = narrationDirectiveForSentence(s)
                 activeReservationMs = awaitPrefetchCapacity(estimateSegmentAudioMs(s.text))
                 if (activeReservationMs <= 0L) return@launch
                 activeIndex = i
@@ -945,7 +971,12 @@ class EngineStreamingSource(
                 val generationStart = System.nanoTime()
                 val pcm = engineMutex.withLock {
                     if (!running.get()) return@withLock null
-                    engine.generateAudioPCM(spokenText, speed, pitch)
+                    engine.prepareNarrationDirective(narrationDirective)
+                    engine.generateAudioPCM(
+                        spokenText,
+                        speed * narrationDirective.speedMultiplier,
+                        pitch * narrationDirective.pitchMultiplier,
+                    )
                 }
                 val generationMs = (System.nanoTime() - generationStart) / 1_000_000L
                 if (pcm == null) {

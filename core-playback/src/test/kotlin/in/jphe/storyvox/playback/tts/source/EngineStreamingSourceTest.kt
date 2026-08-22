@@ -14,6 +14,44 @@ import org.junit.Test
 class EngineStreamingSourceTest {
 
     @Test
+    fun `narration directive reaches serial engine with adjusted prosody`() = runBlocking {
+        var prepared: EngineStreamingSource.NarrationSynthesisDirective? = null
+        var generatedSpeed = 0f
+        var generatedPitch = 0f
+        val engine = object : EngineStreamingSource.VoiceEngineHandle {
+            override val sampleRate = 22_050
+            override fun prepareNarrationDirective(directive: EngineStreamingSource.NarrationSynthesisDirective) {
+                prepared = directive
+            }
+            override fun generateAudioPCM(text: String, speed: Float, pitch: Float): ByteArray {
+                generatedSpeed = speed
+                generatedPitch = pitch
+                return ByteArray(200)
+            }
+        }
+        val directive = EngineStreamingSource.NarrationSynthesisDirective(
+            speedMultiplier = 1.05f,
+            pitchMultiplier = 1.02f,
+            kokoroSpeakerId = 43,
+        )
+        val source = EngineStreamingSource(
+            sentences = listOf(Sentence(0, 0, 10, "Oi.")),
+            startSentenceIndex = 0,
+            engine = engine,
+            speed = 1.2f,
+            pitch = .9f,
+            engineMutex = Mutex(),
+            narrationDirectiveForSentence = { directive },
+        )
+
+        source.nextChunk()
+        assertEquals(directive, prepared)
+        assertEquals(1.26f, generatedSpeed, .0001f)
+        assertEquals(.918f, generatedPitch, .0001f)
+        source.close()
+    }
+
+    @Test
     fun `second pipeline reuses exact segment from RAM without synthesis`() = runBlocking {
         val sentence = Sentence(0, 0, 10, "One.")
         val calls = java.util.concurrent.atomic.AtomicInteger(0)
