@@ -52,6 +52,11 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
 
+    // Fase 5 — runtime local para Gemma. O AAR atual é compilado com Java 21;
+    // o módulo continua emitindo bytecode Java 17 e o build é executado com
+    // JDK 21 (validado antes de esta dependência ser adicionada).
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.16.1")
+
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
 
