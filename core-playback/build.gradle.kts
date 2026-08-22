@@ -52,6 +52,9 @@ kotlin {
 
 dependencies {
     implementation(project(":core-data"))
+    // Fase 5: o player somente agenda a análise local após iniciar a
+    // reprodução. Não há dependência de UI nem espera do pipeline de áudio.
+    implementation(project(":core-llm"))
     // PR-4 (#183) — wires AzureVoiceEngine into EnginePlayer's
     // generateAudioPCM dispatch table. Pure-JVM module, no AAR; brings
     // OkHttp + the SSML builder + the engine handle adapter.

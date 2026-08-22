@@ -40,6 +40,9 @@ import `in`.jphe.storyvox.data.repository.playback.PlaybackModeConfig
 import `in`.jphe.storyvox.data.repository.playback.VoiceTuningConfig
 import `in`.jphe.storyvox.data.repository.pronunciation.PronunciationDict
 import `in`.jphe.storyvox.data.repository.pronunciation.PronunciationDictRepository
+import `in`.jphe.storyvox.llm.local.Gemma4E2bManifest
+import `in`.jphe.storyvox.llm.narration.NarrationAnalysisCoordinator
+import `in`.jphe.storyvox.llm.narration.NarrationInputSegment
 import `in`.jphe.storyvox.playback.EngineSampleRateCache
 import `in`.jphe.storyvox.playback.PlaybackError
 import `in`.jphe.storyvox.playback.PlaybackState
@@ -162,6 +165,9 @@ private fun File.sha256ForDiagnostics(): String = runCatching {
  */
 internal fun shouldAutoPlayAfterAdvance(stateAfterWait: PlaybackState): Boolean =
     stateAfterWait.isPlaying
+
+/** Bump when the persisted narration-segment contract changes. */
+private const val NARRATION_ANALYSIS_SCHEMA_VERSION = 1
 
 /**
  * Issue #1262 — wait for a chapter's body to land in Room before
@@ -563,6 +569,11 @@ class EnginePlayer @AssistedInject constructor(
     private val languageDetectionConfig: LanguageDetectionConfig,
     /** Phase 4 — durable per-model capability result from the short warm-up benchmark. */
     private val voiceBenchmarkStore: TtsVoiceBenchmarkStore,
+    /**
+     * Fase 5: agenda análise local somente após o capítulo já estar pronto
+     * para tocar. Esta dependência nunca é aguardada pelo caminho de áudio.
+     */
+    private val narrationAnalysisCoordinator: NarrationAnalysisCoordinator,
 ) : SimpleBasePlayer(Looper.getMainLooper()) {
 
     @AssistedFactory
@@ -574,7 +585,51 @@ class EnginePlayer @AssistedInject constructor(
     /** Bounded LRU shared across chapter-source rebuilds for immediate seek-back. */
     private val ttsRamCache = TtsRamCache()
 
+    /**
+     * Starts local narration analysis after [loadAndPlay] has already formed
+     * its playback-safe sentence list. The job is deliberately detached from
+     * the audio setup: absent/disabled Gemma, a suspended resource governor,
+     * or inference failure must leave the neutral narrator path untouched.
+     */
+    private fun requestNarrationAnalysis(
+        fictionId: String,
+        chapterId: String,
+        chapterSentences: List<Sentence>,
+    ) {
+        val key = "$fictionId:$chapterId"
+        if (narrationAnalysisJobs[key]?.isActive == true) return
+        val segments = chapterSentences.map { sentence ->
+            NarrationInputSegment(segmentId = sentence.index.toString(), text = sentence.text)
+        }
+        narrationAnalysisJobs[key] = scope.launch(Dispatchers.Default) {
+            try {
+                val analyzed = narrationAnalysisCoordinator.analyzeAndSave(
+                    fictionId = fictionId,
+                    chapterId = chapterId,
+                    segments = segments,
+                    analysisVersion = NARRATION_ANALYSIS_SCHEMA_VERSION,
+                    modelVersion = Gemma4E2bManifest.value.version,
+                )
+                DebugLog.i("EnginePlayer") {
+                    "narration-analysis chapter=$chapterId scheduledResult=$analyzed"
+                }
+            } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) throw t
+                // The player is intentionally fail-open. Keep diagnostics in
+                // logcat but never surface an analysis error as playback error.
+                android.util.Log.w(
+                    "EnginePlayer",
+                    "narration-analysis failed chapter=$chapterId: ${t.message.orEmpty()}",
+                )
+            } finally {
+                withContext(Dispatchers.Main.immediate) { narrationAnalysisJobs.remove(key) }
+            }
+        }
+    }
+
     private var sentences: List<Sentence> = emptyList()
+    /** One background analysis job per chapter; repeated Play taps share it. */
+    private val narrationAnalysisJobs = mutableMapOf<String, Job>()
     @Volatile private var currentChapterTextHash: String = ""
     /** Issue #1001 — sentence indices that open a paragraph, computed
      *  once per chapter alongside [sentences]. Paragraph navigation
@@ -2136,6 +2191,11 @@ class EnginePlayer @AssistedInject constructor(
             invalidateState()
             return@withLock
         }
+        requestNarrationAnalysis(
+            fictionId = playingFictionId(fictionId, chapter),
+            chapterId = chapterId,
+            chapterSentences = sentences,
+        )
         currentSentenceIndex = sentences.indexOfFirst { charOffset <= it.endChar }
             .takeIf { it >= 0 } ?: 0
         // Issue #442 — synth event log on the hot path. When playback

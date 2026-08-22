@@ -8,6 +8,33 @@ import javax.inject.Inject
 class NarrationPlanStore @Inject constructor(
     private val narrationPlanDao: NarrationPlanDao,
 ) {
+    /**
+     * A completed plan is reusable only when every current playback segment
+     * has a row produced by the same model/schema and text content. This
+     * avoids re-running the large local model at every Play tap while still
+     * invalidating safely after an edited or re-imported chapter.
+     */
+    suspend fun needsAnalysis(
+        fictionId: String,
+        chapterId: String,
+        source: List<NarrationInputSegment>,
+        analysisVersion: Int,
+        modelVersion: String,
+        textHash: (String) -> String,
+    ): Boolean {
+        if (source.isEmpty()) return false
+        val current = narrationPlanDao.chapterSnapshot(fictionId, chapterId)
+        if (current.size != source.size) return true
+        val byId = current.associateBy { it.segmentId }
+        return source.any { segment ->
+            val stored = byId[segment.segmentId]
+            stored == null ||
+                stored.analysisVersion != analysisVersion ||
+                stored.modelVersion != modelVersion ||
+                stored.textHash != textHash(segment.text)
+        }
+    }
+
     suspend fun saveWindow(
         fictionId: String,
         chapterId: String,
